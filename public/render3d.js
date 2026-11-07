@@ -518,7 +518,7 @@ class R3D {
       this.scene.add(rel, sh); this.statics.push(rel, sh);
     }
     this.shadowPlane.visible = !this.terr;
-    this.obs = this.buildObstacles(S);
+    this.obs = this.buildObstacles(S, world);
     // the tilted view's ground and overlay sheets: the relief's surface, or a flat sheet over the yard
     {
       let g = this.terr ? this.terr.geometry() : null;
@@ -710,7 +710,7 @@ class R3D {
   }
   T(x, y) { return this.terr ? this.terr.at(x, y) : 0; }   // terrain height
   // rocks and logs as heights (ants climb over them: behavior.js): their tops, on a 4-unit grid
-  buildObstacles(S) {
+  buildObstacles(S, world) {
     const c = 4, gw = Math.ceil(S.W / c) + 1, gh = Math.ceil(S.H / c) + 1, h = new Float32Array(gw * gh);
     const put = (x0, y0, x1, y1, f) => {
       const i0 = Math.max(0, Math.floor(x0 / c)), i1 = Math.min(gw - 1, Math.ceil(x1 / c)), j0 = Math.max(0, Math.floor(y0 / c)), j1 = Math.min(gh - 1, Math.ceil(y1 / c));
@@ -730,6 +730,17 @@ class R3D {
         if (Math.abs(al) > l.len / 2 || Math.abs(pe) >= l.r) return 0;
         return g0 + l.r * 0.72 + Math.sqrt(l.r * l.r - pe * pe);
       });
+    }
+    // the patio's slabs, stepping stones and the picnic blanket (yard3d.js models them): ants walk on top
+    if (S.patio) { const p = S.patio; put(p.x, p.y, p.x + p.w, p.y + p.h, (x, y) => x >= p.x && y >= p.y && x <= p.x + p.w && y <= p.y + p.h ? this.T(x, y) + 3.1 : 0); }
+    for (const st of S.stones || []) {
+      const ca = Math.cos(st.rot || 0), sa = Math.sin(st.rot || 0), m = Math.max(st.rx, st.ry), g0 = this.T(st.x, st.y);
+      put(st.x - m, st.y - m, st.x + m, st.y + m, (x, y) => { const dx = x - st.x, dy = y - st.y, u = (dx * ca + dy * sa) / st.rx, v = (-dx * sa + dy * ca) / st.ry; return u * u + v * v < 1 ? g0 + 2.1 : 0; });
+    }
+    const bl = world && world.poi && world.poi.blanket;
+    if (bl) {
+      const ca = Math.cos(bl.rot || 0), sa = Math.sin(bl.rot || 0), m = Math.hypot(bl.w, bl.h) / 2;
+      put(bl.x - m, bl.y - m, bl.x + m, bl.y + m, (x, y) => { const dx = x - bl.x, dy = y - bl.y, u = dx * ca + dy * sa, v = -dx * sa + dy * ca; return Math.abs(u) < bl.w / 2 && Math.abs(v) < bl.h / 2 ? this.T(x, y) + 1.2 : 0; });
     }
     return { c, gw, gh, h };
   }
@@ -1399,6 +1410,7 @@ const baseDrawSurface = P.drawSurface;
 P.drawSurface = function (ctx, cam, alpha, opacity) {
   const r3 = AL.R3D.enabled ? r3dOf(this) : null;
   AL.R3D.drawing = false;
+  AL.R3D.active = !!r3;   // (the whole 3D frame: 2D drawers of things modelled in 3D, e.g. the blanket, stand down)
   if (!r3) return baseDrawSurface.call(this, ctx, cam, alpha, opacity);
   if (AL.R3D.tilt && AL.R3D.gallery == null) {
     try { return drawTilted.call(this, ctx, cam, alpha, r3); }
