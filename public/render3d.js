@@ -1452,7 +1452,8 @@ AL.R3D = { enabled: pref('3d', 'on') !== 'off', tilt: pref('tilt', 'on') !== 'of
 AL.R3D.extras = [];
 AL.R3D.hatQ = [];
 AL.R3D.drawing = false;
-AL.R3D.kit = { THREE, Builder, Pool, M, V, col, SPH, SPH_LO, CYL, WHITE, palOf, deadPal, antGeos, moundY };
+AL.R3D.kit = { THREE, Builder, Pool, M, V, col, SPH, SPH_LO, CYL, WHITE, palOf, deadPal, antGeos, moundY, CARRY_COL, ANT_Y, LOOK_OF, LIGHT_DIR, TAN };
+AL.R3D.of = r => r3dOf(r);   // (nest3d.js: the renderer's 3D side, made on first use)
 // perf panel (F3): where the 3D frame goes
 AL.R3D.stats = () => {
   const g = AL.Game && AL.Game.renderer && AL.Game.renderer.r3d; if (!g || !g.ms) return '3D idle';
