@@ -47,14 +47,20 @@ class NestBlock {
       }
       return best;   // < 0 inside the cavity
     };
+    // buried rocks: smooth lumps standing proud of the soil (bilinear over the rock tiles' centres)
+    const isRock = (c, r) => c >= 0 && r >= 0 && c < cols && r < rows && nest.base && nest.base[r * cols + c] === TILE.ROCK ? 1 : 0;
+    const rockAt = (x, y) => {
+      const fx = x / T - 0.5, fy = y / T - 0.5, c = Math.floor(fx), r = Math.floor(fy), u = fx - c, v = fy - r;
+      return (isRock(c, r) * (1 - u) + isRock(c + 1, r) * u) * (1 - v) + (isRock(c, r + 1) * (1 - u) + isRock(c + 1, r + 1) * u) * v;
+    };
     const h = new Float32Array(nx * ny);
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
       const x = x0 + i * STEP, y = y0 + j * STEP;
       if (y < -4) { h[j * nx + i] = 0; continue; }   // the sky / yard behind: low
       const d = cut(x, y);
       // walls: a steep rounded lip from the floor (0) up to the wall top
-      const k = AL.clamp((d + 1.5) / 4.5, 0, 1);
-      h[j * nx + i] = WALL * k * k * (3 - 2 * k);
+      const k = AL.clamp((d + 1.5) / 4.5, 0, 1), rk = rockAt(x, y);
+      h[j * nx + i] = WALL * k * k * (3 - 2 * k) + (rk > 0 ? 7 * Math.pow(rk, 0.7) * k * (0.85 + 0.3 * AL.hash2(i >> 1, j >> 1, 3)) : 0);
     }
     this.g = { x0, y0, nx, ny, h };
     // geometry: positions (NX0 + x, h, y), uv = nest units (the painted canvas maps them), vertex shade from the light
@@ -90,8 +96,12 @@ class NestBlock {
 }
 
 const S = { block: new NestBlock(), mat: null, shMat: null, cam: null, R: null, on: false, r3: null };
+const BC = { egg: new THREE.Color('#fbf6ea'), larva: new THREE.Color('#f3e6c4'), larvaH: new THREE.Color('#d8c8a0'), larvaHead: new THREE.Color('#c9a16a'), pupa: new THREE.Color('#d8b47a'),
+  sugar: new THREE.Color('#f2c14e'), protein: new THREE.Color('#c4553e'), seed: new THREE.Color('#a07a42') };
 function mats(r3) {
   if (S.mat) return;
+  S.blobs = new KIT.Pool(r3, new THREE.SphereGeometry(1, 12, 8), new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.02 }));
+  S.bits = new KIT.Pool(r3, new THREE.IcosahedronGeometry(1, 0), new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0, flatShading: true }));
   S.mat = new THREE.MeshBasicMaterial({ vertexColors: true, toneMapped: false });
   S.shMat = new THREE.ShadowMaterial({ color: 0x120a04, opacity: 0.38, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -2 });
 }
@@ -148,10 +158,47 @@ function putAnts(r3, r, alpha, ox, oy, z) {
   }
   for (const g of r3.groups.values()) g.end(true);
   CP.end(); r3.cEnd();
+  putStuff(r, owner);
   const hats = R3.extras.find(e => e.id === 'hats');
   if (hats) { try { hats.update(r3, world, v, performance.now() / 1000); } catch (e) { /* drawn next frame */ } }
 }
 
+// brood in the nurseries and the food piled in the stores, as small models on the chamber floors (the same spots and
+// counts render-nest.js painted them at)
+function putStuff(r, col) {
+  const nest = r.nest, T = nest.tile, B = S.blobs, Bi = S.bits, v = S.R;
+  B.begin(); Bi.begin();
+  const inV = (x, y) => x > v.x0 - 10 && x < v.x1 + 10 && y > v.y0 - 10 && y < v.y1 + 10;
+  const ft = nest.tiles[N.CH.FOOD];
+  if (ft && ft.length && col.stock) {
+    const s = col.stock, total = s.sugar + s.protein + s.seeds, fill = Math.min(1, total / Math.max(1, col.cap.food));
+    const items = Math.round(ft.length * 5 * fill), sF = total > 0 ? s.sugar / total : 0, pF = total > 0 ? s.protein / total : 0;
+    for (let k = 0; k < items; k++) {
+      const t = ft[(k * 7) % ft.length], [cx, cy] = N.centre(nest, t);
+      const px = cx + (AL.hash2(k, 1, 3) - 0.5) * 8, py = cy + 2.5 - AL.hash2(k, 2, 3) * 4, u = AL.hash2(k, 3, 3);
+      if (!inV(px, py)) continue;
+      const h = S.block.height(px, py);
+      if (u < sF) B.put(NX0 + px, h + 1.3, py, 0, 1.6, 1.4, 1.6, BC.sugar);
+      else if (u < sF + pF) Bi.put(NX0 + px, h + 1, py, u * 9, 1.5, 1.1, 1.3, BC.protein);
+      else B.put(NX0 + px, h + 0.7, py, u * 6, 1.7, 0.7, 0.9, BC.seed);
+    }
+  }
+  const t = r.frame * 0.03;
+  for (let k = 0; k < (col.brood || []).length; k++) {
+    const b = col.brood[k]; if (b.slot < 0) continue;
+    const [cx, cy] = N.centre(nest, b.slot), sub = b.sub || 0;
+    const px = cx + ((sub % 3) - 1) * 3.2, py = cy + 2 - ((sub / 3) | 0) * 2.6;
+    if (!inV(px, py)) continue;
+    const h = S.block.height(px, py);
+    if (b.stage === 0) B.put(NX0 + px, h + 0.7, py, 0.3, 1.2, 0.8, 0.85, BC.egg);
+    else if (b.stage === 1) {
+      const s = 0.7 + b.t * 0.6, wig = Math.sin(t * 3 + k) * 0.15;
+      B.put(NX0 + px, h + 1.1 * s, py, wig, 2.2 * s, 1.3 * s, 1.4 * s, b.starve > 20 ? BC.larvaH : BC.larva);
+      B.put(NX0 + px + Math.cos(wig) * 1.9 * s, h + 1.2 * s, py + Math.sin(wig) * 1.9 * s, wig, 0.55 * s, 0.5 * s, 0.55 * s, BC.larvaHead);
+    } else B.put(NX0 + px, h + 1.3, py, 0, 2.6, 1.3, 1.4, BC.pupa);
+  }
+  B.end(); Bi.end();
+}
 const baseDrawNest = P.drawNest;
 function drawNest3D(ctx, cam, alpha, opacity) {
   const r3 = R3.of(this), nest = this.nest;
@@ -172,10 +219,17 @@ function drawNest3D(ctx, cam, alpha, opacity) {
   try {
     this.drawNestAnts = function (c, al, v, z, ox, oy) { me.barBegin(false); S.ants = { al, z, ox, oy }; };
     this.drawChamberLabels = function () {};   // (drawn upright on the screen afterwards: walls would cut them)
+    // brood and food piles are models now (putStuff); the painted sheet keeps the bodies and the midden
+    this.drawNestContents = function (c, nst, col) {
+      const dead = this.atlas[0].dead;
+      for (const k of nst.corpses) { c.save(); c.translate(k.x, k.y + 2); c.rotate(k.a); c.scale(0.8 / dead.scale, 0.8 / dead.scale); c.drawImage(dead.img, -dead.cs / 2, -dead.cs / 2); c.restore(); }
+      const mt = nst.tiles[N.CH.MIDDEN];
+      if (mt && mt.length) { const n = Math.min(mt.length * 6, Math.round(nst.middenFill)); for (let k = 0; k < n; k++) { const tt = mt[k % mt.length], [cx, cy] = N.centre(nst, tt); c.fillStyle = k % 3 ? 'rgba(60,50,30,0.8)' : 'rgba(110,100,60,0.8)'; c.fillRect(cx + (AL.hash2(k, 5, 1) - 0.5) * 8, cy + 3 - AL.hash2(k, 6, 1) * 2.5, 1.6, 1.2); } }
+    };
     this.layer = function (name, c, view) { if (name === 'nestScreen') { lv = view; return; } return layer.call(this, name, c, view); };
     B.uc.globalAlpha = 1;
     baseDrawNest.call(this, B.uc, c2, alpha, 1);
-  } finally { this.w = W0; this.h = H0; this.dpr = D0; this.drawNestAnts = ants; this.layer = layer; this.drawChamberLabels = labels; }
+  } finally { this.w = W0; this.h = H0; this.dpr = D0; this.drawNestAnts = ants; this.layer = layer; this.drawChamberLabels = labels; delete this.drawNestContents; }
   // 2. the 3D: hide the yard's sheets, light the nest, put the ants, render
   if (r3.ground3d) r3.ground3d.visible = r3.over3d.visible = false;
   r3.depth.visible = false; r3.shadowPlane.visible = false;
