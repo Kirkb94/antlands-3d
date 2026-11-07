@@ -4,10 +4,7 @@
 //   - Play / Settings tabs (Settings: rivals, text size, 3D models, shadows, rolling ground, title ants, sound, keys)
 //   - every species card shows its 3D ant turning (render3d.js antModel)
 //   - live 3D ants crawl over the screen around the panel and scatter from the mouse
-// Three rough layout drafts to pick from (corner switcher, remembered; ?layout=1|2|3):
-//   1 Classic   the old panel on the left, an ant column marching round its border
-//   2 Sidebar   a full-height glass sidebar with a big turning portrait of your species; ants along its edge
-//   3 Centered  a huge logo with ants walking over it, a wide two-column card below
+// Layout: the classic panel on the left, an ant column marching round its border and another trail along the bottom.
 import * as THREE from './vendor/three.module.js';
 
 const AL = window.AL, UI = AL.UI, R3 = AL.R3D, C = AL.CASTE, TAU = Math.PI * 2;
@@ -15,9 +12,7 @@ const $ = id => document.getElementById(id);
 const vn = (x, y, s) => R3.vnoise(x + 1000, y + 1000, s);
 const load = (k, d) => { try { return localStorage.getItem('antlands.' + k) || d; } catch (_) { return d; } };
 const save = (k, v) => { try { localStorage.setItem('antlands.' + k, v); } catch (_) { /* private mode */ } };
-const LAYOUTS = [{ key: '1', name: 'Classic' }, { key: '2', name: 'Sidebar' }, { key: '3', name: 'Centered' }];
-const SHIFT = [[-0.17, 0], [-0.2, 0], [0, 0.05]];   // where the mound sits on screen in each layout
-let lay = Math.max(0, '123'.indexOf(new URLSearchParams(location.search).get('layout') || load('titleLayout', '1')));
+const SHIFT = [-0.17, 0];   // push the mound right of the panel
 let antsOn = load('titleAnts', 'on') !== 'off';
 const timeU = { value: 0 }, mouse = { x: -999, y: -999 };
 addEventListener('pointermove', e => { mouse.x = e.clientX; mouse.y = e.clientY; });
@@ -151,7 +146,7 @@ function moundScene() {
   };
 }
 
-// ---- 3D species portraits (species cards; the sidebar's big portrait) ------------------------------------------
+// ---- 3D species portraits on the species cards ------------------------------------------------------------------
 const Port = {
   r: null, scene: null, cam: null, models: new Map(),
   init() {
@@ -183,14 +178,12 @@ const Port = {
       m.rotation.y = t * (on ? 1.1 : 0.45) + i * 0.8; m.userData.frame(on ? FR[((t * 9) | 0) & 3] : 0);
       this.draw(cv, m, 22, 12); i++;
     }
-    const hp = $('heroPortrait');
-    if (hp && lay === 1) { const m = this.model(UI.species || 'fire'); m.rotation.y = t * 0.5; m.userData.frame(FR[((t * 7) | 0) & 3]); this.draw(hp, m, 24, 10); }
   },
 };
 
 // ---- 3D ants crawling over the screen (top-down, pixel space), scattering from the cursor --------------------------
 const Crawl = {
-  r: null, scene: null, cam: null, cv: null, ants: [], shadowMat: null, built: -1,
+  r: null, scene: null, cam: null, cv: null, ants: [], shadowMat: null, built: false,
   init() {
     const cv = this.cv = document.createElement('canvas'); cv.id = 'titleAnts';
     cv.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;z-index:33;pointer-events:none;display:none';
@@ -211,18 +204,15 @@ const Crawl = {
   },
   // paths: { len, at(s) -> [x, y] } over arc length, measured from the layout's DOM boxes each frame
   paths() {
-    const W = innerWidth, H = innerHeight, sheet = document.querySelector('#title .sheet.hero'), h1 = sheet && sheet.querySelector('h1');
+    const W = innerWidth, H = innerHeight, sheet = document.querySelector('#title .sheet.hero');
     const rs = sheet ? sheet.getBoundingClientRect() : { left: 40, top: 40, right: 500, bottom: H - 40 };
     const loop = (x0, y0, x1, y1) => { const w = x1 - x0, h = y1 - y0, L = 2 * (w + h); return { len: L, loop: true, at(s) { s = ((s % L) + L) % L; if (s < w) return [x0 + s, y0]; s -= w; if (s < h) return [x1, y0 + s]; s -= h; if (s < w) return [x1 - s, y1]; s -= w; return [x0, y1 - s]; } }; };
     const wave = (x0, x1, y, amp, per) => { const L = x1 - x0; return { len: L, loop: true, at(s) { s = ((s % L) + L) % L; const x = x0 + s; return [x, y + Math.sin(x / per) * amp]; } }; };
-    if (lay === 0) return [{ p: loop(rs.left - 16, rs.top - 16, rs.right + 16, rs.bottom + 16), n: 18, v: 44 }, { p: wave(-60, W + 60, H - 34, 10, 90), n: 6, v: 62 }];
-    if (lay === 1) return [{ p: loop(rs.right + 14, 24, rs.right + 46, H - 24), n: 14, v: 40 }, { p: wave(rs.right + 60, W + 60, 64, 14, 120), n: 7, v: 58 }];
-    const rh = h1 ? h1.getBoundingClientRect() : { left: W * 0.3, top: 40, right: W * 0.7, bottom: 160 };
-    return [{ p: loop(rh.left - 10, rh.top + 4, rh.right + 10, rh.bottom - 6), n: 16, v: 46 }, { p: loop(rs.left - 14, rs.top - 14, rs.right + 14, rs.bottom + 14), n: 12, v: 40 }];
+    return [{ p: loop(rs.left - 16, rs.top - 16, rs.right + 16, rs.bottom + 16), n: 18, v: 44 }, { p: wave(-60, W + 60, H - 34, 10, 90), n: 6, v: 62 }];
   },
   build() {
     for (const a of this.ants) { this.scene.remove(a.m); this.scene.remove(a.sh); }
-    this.ants = []; this.built = lay; this.key = UI.species || 'fire';
+    this.ants = []; this.built = true; this.key = UI.species || 'fire';
     const { cols, sp } = specCols(), P = this.paths(), sq = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
     P.forEach((path, pi) => {
       for (let i = 0; i < path.n; i++) {
@@ -236,7 +226,7 @@ const Crawl = {
   tick(t, dt) {
     if (!antsOn) { this.cv.style.display = 'none'; return; }
     this.cv.style.display = 'block';
-    if (this.built !== lay || this.key !== (UI.species || 'fire')) this.build();
+    if (!this.built || this.key !== (UI.species || 'fire')) this.build();
     const P = this.paths();
     for (const a of this.ants) {
       const path = P[a.pi].p; a.s0 += a.v * dt / path.len;
@@ -269,7 +259,6 @@ function mountUI() {
   const sheet = document.querySelector('#title .sheet.hero'); if (!sheet) return;
   if (!$('tTabs')) {
     const h1 = sheet.querySelector('h1');
-    const hp = document.createElement('canvas'); hp.id = 'heroPortrait'; hp.width = 440; hp.height = 230;
     const tabs = document.createElement('div'); tabs.id = 'tTabs';
     tabs.innerHTML = '<button type="button" data-t="play" class="on">Play</button><button type="button" data-t="set">Settings</button>';
     const play = document.createElement('div'); play.id = 'tPlay';
@@ -279,7 +268,7 @@ function mountUI() {
       segRow('Rolling ground', 'relief', [['on', 'On'], ['off', 'Flat']], 'next game') + segRow('Ants on this screen', 'tants', [['on', 'On'], ['off', 'Off']]) +
       '<h3>Sound</h3>' + segRow('Sound', 'sound', [['on', 'On'], ['off', 'Off']]) +
       '<h3>Keys</h3><p class="mute small" style="margin-top:2px">Space pause · 1 2 3 speed · Tab nest view · H hide trails · M sound · Esc menu · F7 3D / 2D · F8 3D model gallery</p>';
-    h1.after(hp); hp.after(tabs); tabs.after(play); play.after(set);
+    h1.after(tabs); tabs.after(play); play.after(set);
     tabs.onclick = e => { const b = e.target.closest('button'); if (b) showTab(b.dataset.t); };
     set.addEventListener('click', e => {
       const b = e.target.closest('.tseg button'); if (!b) return;
@@ -293,14 +282,14 @@ function mountUI() {
     });
   }
   // everything else in the panel lives on the Play tab (also bits other modules add later)
-  const keep = new Set(['tTabs', 'tPlay', 'tSettings', 'heroPortrait']), play = $('tPlay');
+  const keep = new Set(['tTabs', 'tPlay', 'tSettings']), play = $('tPlay');
   for (const el of [...sheet.children]) if (!keep.has(el.id) && el.tagName !== 'H1' && !el.classList.contains('kicker')) play.appendChild(el);
   const g = $('setRow'); if (g && g.parentElement !== $('tsGame')) $('tsGame').appendChild(g);
   syncSettings();
 }
 
 // ---- lifecycle -----------------------------------------------------------------------------------------------
-let renderer = null, cv = null, sw = null, active = null, raf = 0, last = 0, tidy = 0;
+let renderer = null, cv = null, active = null, raf = 0, last = 0, tidy = 0;
 function ensure() {
   if (renderer) return true;
   try {
@@ -314,15 +303,9 @@ function ensure() {
     Port.init(); Crawl.init();
   } catch (e) { console.error('[Antlands 3D title]', e); renderer = null; return false; }
   addEventListener('resize', resize);
-  sw = document.createElement('div'); sw.id = 'menuSwitch'; sw.hidden = true;
-  sw.innerHTML = '<span>Title draft</span>' + LAYOUTS.map((d, i) => '<button type="button" data-i="' + i + '"><b>' + d.key + '</b> ' + d.name + '</button>').join('');
-  sw.onclick = e => { const b = e.target.closest('button'); if (b) setLayout(+b.dataset.i); };
-  document.body.appendChild(sw);
   const st = document.createElement('style');
   st.textContent = `
-#menuSwitch{position:fixed;right:14px;bottom:14px;z-index:34;display:flex;gap:6px;align-items:center;background:rgba(20,13,7,.82);border:1px solid rgba(214,170,110,.35);border-radius:12px;padding:6px 8px;font:12px system-ui,sans-serif;color:#e9dcc0}
-#menuSwitch span{opacity:.75;margin-right:2px}#menuSwitch button{padding:4px 10px;font-size:12px}#menuSwitch button.on{border-color:#f2c14e;background:#6a4a16}
-body.m3d .ov.title{background:none}
+body.m3d .ov.title{background:linear-gradient(90deg,rgba(14,8,3,.6),rgba(14,8,3,0) 48%)}
 body.m3d .sheet.hero{overflow-x:hidden;background:rgba(26,16,8,.58);border-color:rgba(255,200,120,.28)}
 body.m3d .sheet.hero h1{color:#ffd27a;text-shadow:0 0 30px rgba(255,170,60,.6),0 3px 0 rgba(0,0,0,.4)}
 body.m3d .kicker{color:#ffb070}
@@ -336,50 +319,29 @@ body.m3d .kicker{color:#ffb070}
 #tSettings .tseg{display:inline-flex}#tSettings .tseg button{border-radius:0;padding:4px 12px;margin-left:-1px}
 #tSettings .tseg button:first-child{border-radius:8px 0 0 8px}#tSettings .tseg button:last-child{border-radius:0 8px 8px 0}
 #tSettings .tseg button.on{background:#6a4a16;border-color:#f2c14e;color:#fff}
-#heroPortrait{display:none}
 .spc canvas{transition:transform .2s}.spc.on canvas{transform:scale(1.12)}
-body.L1 .ov.title{background:linear-gradient(90deg,rgba(14,8,3,.6),rgba(14,8,3,0) 48%)}
-body.L2 .ov.title{padding:0;justify-content:flex-start;align-items:stretch;background:linear-gradient(90deg,rgba(10,6,2,.35),rgba(10,6,2,0) 42%)}
-body.L2 .sheet.hero{max-width:440px;height:100vh;max-height:100vh;border-radius:0 22px 22px 0;border-left:none;border-top:none;border-bottom:none;background:rgba(16,10,5,.66);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px)}
-body.L2 #heroPortrait{display:block;width:100%;height:auto;margin:-4px 0 2px;border-radius:14px;background:radial-gradient(ellipse at 50% 72%,rgba(255,190,110,.26),rgba(0,0,0,0) 68%)}
-body.L2 .startrow{flex-wrap:wrap}
-body.L2 .sheet.hero h1{font-size:clamp(44px,5.4vw,64px);margin-bottom:0}
-body.L3 .ov.title{align-items:flex-end;justify-content:center;padding:0 16px 2.5vh;background:linear-gradient(0deg,rgba(10,6,2,.6),rgba(10,6,2,0) 58%)}
-body.L3 #tSettings:not([hidden]){columns:2;column-gap:34px}body.L3 #tSettings h3{break-after:avoid}body.L3 #tSettings .tsrow{break-inside:avoid}
-body.L3 .sheet.hero{max-width:min(1060px,96vw);max-height:47vh;margin-bottom:44px;backdrop-filter:none;-webkit-backdrop-filter:none;background:rgba(24,15,8,.78)}
-body.L3 .sheet.hero h1{position:fixed;top:4vh;left:50%;transform:translateX(-50%);font-size:clamp(70px,11vw,150px);line-height:1;white-space:nowrap;pointer-events:none;margin:0}
-body.L3 .sheet.hero .kicker{position:fixed;top:calc(4vh + clamp(70px,11vw,150px) + 10px);left:50%;transform:translateX(-50%);font-size:14px;white-space:nowrap;text-shadow:0 2px 6px rgba(0,0,0,.85)}
-body.L3 #tPlay{display:grid;grid-template-columns:1.15fr 1fr;column-gap:22px;align-items:start}
-body.L3 #tPlay > #speciesPick{grid-column:1;grid-row:1 / span 30;margin:0}
-body.L3 #tPlay > *:not(#speciesPick){grid-column:2}`;
+`;
   document.head.appendChild(st);
   return true;
 }
 function resize() {
   if (!renderer) return;
   renderer.setSize(innerWidth, innerHeight, false); Crawl.resize();
-  if (active) { const c = active.cam, w = innerWidth, h = innerHeight; c.aspect = w / h; c.setViewOffset(w, h, w * SHIFT[lay][0], h * SHIFT[lay][1], w, h); c.updateProjectionMatrix(); }
-}
-function setLayout(i) {
-  lay = i; save('titleLayout', LAYOUTS[i].key);
-  document.body.classList.remove('L1', 'L2', 'L3'); document.body.classList.add('L' + LAYOUTS[i].key);
-  if (sw) for (const b of sw.querySelectorAll('button')) b.classList.toggle('on', +b.dataset.i === i);
-  resize();
+  if (active) { const c = active.cam, w = innerWidth, h = innerHeight; c.aspect = w / h; c.setViewOffset(w, h, w * SHIFT[0], h * SHIFT[1], w, h); c.updateProjectionMatrix(); }
 }
 function hide() {
   cancelAnimationFrame(raf); raf = 0;
   if (cv) cv.style.display = 'none';
   if (Crawl.cv) Crawl.cv.style.display = 'none';
-  document.body.classList.remove('m3d', 'L1', 'L2', 'L3');
-  if (sw) sw.hidden = true;
+  document.body.classList.remove('m3d');
 }
 function start() {
   if (!ensure()) return;
   mountUI(); showTab('play');
   if (!active) { try { active = moundScene(); } catch (e) { console.error('[Antlands 3D title] scene', e); return; } }
-  cv.style.display = 'block'; sw.hidden = false;
+  cv.style.display = 'block';
   document.body.classList.add('m3d');
-  setLayout(lay);
+  resize();
   if (AL.Game) AL.Game.paused = true;   // the demo colony behind is covered: let it rest
   last = performance.now();
   cancelAnimationFrame(raf); raf = requestAnimationFrame(loop);
@@ -399,4 +361,4 @@ function loop(now) {
 
 const baseShowTitle = UI.showTitle;
 UI.showTitle = function () { baseShowTitle.apply(this, arguments); start(); };
-AL.Menu3D = { start, hide, setLayout, LAYOUTS };
+AL.Menu3D = { start, hide };
