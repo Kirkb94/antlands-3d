@@ -39,14 +39,14 @@ const BIOMES = AL.BIOMES = {
     key: 'backyard', name: 'Backyard', blurb: 'The lawn behind the house: people walk through, the mower comes round, and there\'s a picnic in the middle.',
     humans: true, centre: 'spill', ground: '#5b8a3b',
     pick: (a, b, c) => (b > 0.68 ? T.SAND : a < 0.36 ? T.MUD : a > 0.66 ? T.LITTER : c > 0.72 ? T.GRAVEL : T.GRASS),
-    weather: { rain: 1, heat: 1, temp: 0 }, flood: 1, streams: 0.5,
+    weather: { rain: 1, heat: 1, temp: 0 }, flood: 1, streams: 0.5, ponds: 1,
     terrain: ['grass', 'sand', 'gravel', 'mud', 'litter', 'stream'],
   },
   forest: {
     key: 'forest', name: 'Forest floor', blurb: 'Deep leaf litter under the trees: shady, slow going, and crawling with prey. More spiders and beetles.',
     humans: false, centre: 'nest', ground: '#4f5a2a', trees: 3, logs: 2,
     pick: (a, b, c) => (a < 0.36 ? T.MUD : b > 0.64 ? T.GRASS : c > 0.75 ? T.GRAVEL : T.LITTER),
-    weather: { rain: 1.2, heat: 0.4, temp: -3 }, flood: 1, streams: 0.6,
+    weather: { rain: 1.2, heat: 0.4, temp: -3 }, flood: 1, streams: 0.6, ponds: 1,
     creatures: { spider: 1.5, beetle: 1.5, ladybug: 0.8 },
     edge: { army: { lay: 1.08 }, bullet: { hp: { all: 1.08 } }, carpenter: { dig: 1.25, life: 1.05 } },
     terrain: ['litter', 'grass', 'mud', 'gravel', 'stream'],
@@ -55,16 +55,16 @@ const BIOMES = AL.BIOMES = {
     key: 'desert', name: 'Desert', blurb: 'Sand and gravel under a hard sun. Little rain, few plants, lots of seed.',
     humans: false, centre: 'cactus', ground: '#c9ad74', noAphids: 0.5, noClover: 0.6, seeds: 2, puddles: 0.4,
     pick: (a, b, c) => (b > 0.6 ? T.GRAVEL : a < 0.34 ? T.GRASS : T.SAND),
-    weather: { rain: 0.3, heat: 2.2, temp: 7 }, flood: 0.6,
+    weather: { rain: 0.3, heat: 2.2, temp: 7 }, flood: 0.6, ponds: 0.3,
     creatures: { ladybug: 0.4, caterpillar: 0.5 },
     edge: { honeypot: { lay: 1.1, appetite: 0.92 }, harvester: { lay: 1.08, speed: 1.05 }, leafcutter: { fungus: 0.85 } },
-    terrain: ['sand', 'gravel', 'grass'],
+    terrain: ['sand', 'gravel', 'grass', 'stream'],
   },
   wetland: {
     key: 'wetland', name: 'Wetland', blurb: 'Mud, puddles and slow streams. It rains a lot and nests flood. Carpenter ants and fire ants cope best.',
     humans: false, centre: 'frog', ground: '#4b6a3a', puddles: 2.5, clover: 1.5,
     pick: (a, b, c) => (a < 0.47 ? T.MUD : b > 0.66 ? T.LITTER : c > 0.76 ? T.SAND : T.GRASS),
-    weather: { rain: 1.8, heat: 0.6, temp: -1 }, flood: 1.4, streams: 1, waterTable: -8,
+    weather: { rain: 1.8, heat: 0.6, temp: -1 }, flood: 1.4, streams: 1, ponds: 1.5, waterTable: -8,
     creatures: { caterpillar: 1.3, ladybug: 1.2 },
     edge: { carpenter: { hp: { all: 1.08 }, life: 1.08 }, fire: { lay: 1.05 }, leafcutter: { fungus: 1.08 } },
     terrain: ['mud', 'grass', 'litter', 'sand', 'stream'],
@@ -112,6 +112,40 @@ function across(b, u, v, seed) {
   return u * b.nx + v * b.ny - b.off - b.amp * (AL.fbm(along / 520 + b.ph, b.ph * 0.37, (seed | 0) + 606, 2) - 0.5) * 2;
 }
 const inStream = (bands, u, v, seed) => { for (const b of bands) if (Math.abs(across(b, u, v, seed)) < b.w) return true; return false; };
+// Ponds: big long pools (the same water as the streams: swimmable at a third of the speed). Long and fairly narrow,
+// so walking round one is a long way while a living ant bridge reaches across its narrow way. Never over a nest.
+// In the same folded coordinates as the streams. -> [{ cu, cv, ca, sa, ra, rb, ph }]
+// fold: world (x, y) -> folded (u, v) (a fair map's kaleidoscope; copies = how many times each pond then shows)
+function pondPlan(seed, B, W, H, avoid, fold, copies, dry) {
+  if (!B.ponds) return [];
+  fold = fold || ((x, y) => [x - W / 2, y - H / 2]);
+  const h = k => AL.hash2(seed | 0, k, 717), many = (copies || 1) > 1, k0 = Math.min(W, H) / 3000 * (many ? 0.75 : 1);
+  // (a fair map repeats every pond round each colony: one at most there)
+  // (dry: no river came out, so at least one pond: there's always water to bridge)
+  const n = Math.max(dry ? 1 : 0, many ? (h(1) < B.ponds * 0.6 ? 1 : 0) : Math.floor(B.ponds * 2 + h(1) * 1.2)), out = [];
+  for (let s = 0; s < n; s++) {
+    let p = null;
+    for (let tryN = 0; tryN < 40 && !p; tryN++) {
+      const k = 20 + s * 60 + tryN * 3, a = h(k) * Math.PI;
+      const [cu, cv] = fold(W / 2 + (h(k + 1) - 0.5) * W * 0.8, H / 2 + (h(k + 2) - 0.5) * H * 0.8);
+      const q = { cu, cv, ca: Math.cos(a), sa: Math.sin(a),
+        ra: (280 + h(k + 3) * 240) * k0, rb: (64 + h(k + 4) * 22) * k0, ph: h(k + 5) * 40 };
+      const clear = q.ra + (tryN < 20 ? 190 : 150);
+      if ((avoid || []).every(v => (v[0] - q.cu) ** 2 + (v[1] - q.cv) ** 2 > clear * clear) && out.every(o => (o.cu - q.cu) ** 2 + (o.cv - q.cv) ** 2 > (o.ra + q.ra + 120) ** 2)) p = q;
+    }
+    if (p) out.push(p);
+  }
+  return out;
+}
+function inPond(ponds, u, v, seed) {
+  for (const p of ponds) {
+    const du = u - p.cu, dv = v - p.cv, a = (du * p.ca + dv * p.sa) / p.ra, b = (-du * p.sa + dv * p.ca) / p.rb;
+    const d = a * a + b * b; if (d > 2) continue;
+    const wob = (AL.fbm(u / 110 + p.ph, v / 110 - p.ph, (seed | 0) + 515, 2) - 0.5) * 0.6;   // (a ragged shore)
+    if (d < 1 + wob) return true;
+  }
+  return false;
+}
 function generate(world) {
   const S = world.surface, B = biomeOf(world), seed = world.seed | 0, gw = S.gw, gh = S.gh, cell = S.cell;
   const ter = S.terrain = new Uint8Array(gw * gh), fold = folder(world);
@@ -120,6 +154,9 @@ function generate(world) {
   const nearAny = (x, y, list, r) => { for (const p of list) if ((p.x - x) * (p.x - x) + (p.y - y) * (p.y - y) < r * r) return true; return false; };
   const keepClear = (x, y) => nearAny(x, y, nests, 150) || nearAny(x, y, pois, 45);   // (food stays on dry ground: a little island if a river runs through it)
   const bands = flat ? [] : streamPlan(seed, B, Math.min(S.W, S.H), nests.map(p => fold(p.x, p.y)));
+  const L = world.layout, fairN = L && L.fair && L.nests ? L.nests.length : 0;
+  const ponds = flat ? [] : pondPlan(seed, B, S.W, S.H, nests.map(p => fold(p.x, p.y)), fold, fairN >= 2 ? fairN * 2 : 1, false);
+  let wet = 0;
   for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
     const x = (gx + 0.5) * cell, y = (gy + 0.5) * cell, i = gy * gw + gx;
     if (S.blocked[i]) { ter[i] = T.GRASS; continue; }
@@ -130,7 +167,19 @@ function generate(world) {
     if (nearAny(x, y, nests, 120)) t = T.GRASS;
     // streams: rivers right across the map (swimmable at a third of the speed; colonies bridge them with their own ants)
     if (bands.length && inStream(bands, u, v, seed) && !keepClear(x, y)) t = T.STREAM;
-    ter[i] = t;
+    // ponds: long pools (the same water; walking round one is a long way, an ant bridge cuts across)
+    else if (ponds.length && inPond(ponds, u, v, seed) && !keepClear(x, y)) t = T.STREAM;
+    ter[i] = t; if (t === T.STREAM) wet++;
+  }
+  // no water came out at all (the rivers missed the map): one pond anyway, so there's always water to bridge
+  if (!wet && !flat) {
+    const dry = pondPlan(seed, B, S.W, S.H, nests.map(p => fold(p.x, p.y)), fold, fairN >= 2 ? fairN * 2 : 1, true);
+    if (dry.length) for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+      const x = (gx + 0.5) * cell, y = (gy + 0.5) * cell, i = gy * gw + gx;
+      if (S.blocked[i]) continue;
+      const [u, v] = fold(x, y);
+      if (inPond(dry, u, v, seed) && !keepClear(x, y)) ter[i] = T.STREAM;
+    }
   }
   if (!flat) connect(S, nests.length ? nests : [{ x: S.W / 2, y: S.H / 2 }], pois);
   S.biome = B.key;
@@ -219,6 +268,6 @@ AL.registerSystem({
     }
   },
 });
-AL.Terrain = { STREAM_W, streamPlan, inStream, T, INFO, BIOMES, generate, at, mudShare, preyMul, biomeOf, folder };
+AL.Terrain = { STREAM_W, streamPlan, inStream, pondPlan, inPond, T, INFO, BIOMES, generate, at, mudShare, preyMul, biomeOf, folder };
 if (NODE) module.exports = AL.Terrain;
 })(typeof window !== 'undefined' ? window : globalThis);

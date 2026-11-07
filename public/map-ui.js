@@ -17,11 +17,13 @@ function preview(key) {
   if (previews[key]) return previews[key];
   const B = AL.BIOMES[key], w = 96, h = 72, c = document.createElement('canvas'); c.width = w; c.height = h;
   const x = c.getContext('2d'), img = x.createImageData(w, h), T = AL.TERRAIN, bands = AL.Terrain.streamPlan(7, B, h * 40, [[-28 * 40, 18 * 40], [28 * 40, -18 * 40], [-28 * 40, -18 * 40], [28 * 40, 18 * 40]]);
+  const ponds = AL.Terrain.pondPlan ? AL.Terrain.pondPlan(7, B, w * 40, h * 40, [[-28 * 40, 18 * 40], [28 * 40, -18 * 40], [-28 * 40, -18 * 40], [28 * 40, 18 * 40]]) : [];
   for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
     const u = (px - w / 2) * 40, v = (py - h / 2) * 40;
     const a = AL.fbm(u / 620 + 7.3, v / 620 + 1.9, 101, 3), b = AL.fbm(u / 380 + 3.1, v / 380 - 2.2, 202, 3), cc = AL.fbm(u / 240 - 5.5, v / 240 + 4.4, 303, 2);
     let t = B.pick(a, b, cc);
     if (bands.length && AL.Terrain.inStream(bands.map(b => Object.assign({}, b, { w: b.w * 3 })), u, v, 7)) t = T.STREAM;   // (drawn wider: the preview is tiny)
+    else if (ponds.length && AL.Terrain.inPond(ponds, u, v, 7)) t = T.STREAM;
     const hex = parseInt(TONE[t].slice(1), 16), n = 0.88 + AL.hash2(px, py, 5) * 0.2, i = (py * w + px) * 4;
     img.data[i] = ((hex >> 16) & 255) * n; img.data[i + 1] = ((hex >> 8) & 255) * n; img.data[i + 2] = (hex & 255) * n; img.data[i + 3] = 255;
   }

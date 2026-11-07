@@ -22,7 +22,7 @@ const ST = AL.ST, C = AL.CASTE, L = AL.LAYER;
 const BT = AL.BRIDGE_TUNE = Object.assign({
   PER: 2.5,           // units of water one ant spans (the chain is three ants wide)
   MIN: 5,             // the smallest bridge
-  MAX_WATER: 160,     // the widest water a bridge can span
+  MAX_WATER: 240,     // the widest water a bridge can span (a pond's narrow way: ~160-210)
   BANK: 10,           // how far a bridge reaches onto dry ground at each end
   HALF_W: 6,          // half-width of the deck ants walk on
   END_R: 7,           // an end ant as a bite target
@@ -35,7 +35,7 @@ const BT = AL.BRIDGE_TUNE = Object.assign({
   AI_MAX: 2,          // most bridges an AI rival keeps
   AI_POP: 25,         // ... and the colony size it needs first
   AI_SCAN: 600,       // how far from its nest it looks for water
-  AI_WATER: 110,      // the widest water it bridges
+  AI_WATER: 170,      // the widest water it bridges
 }, AL.BRIDGE_TUNE || {});
 const ID0 = 9000000;   // bridge end ids (combat.js A.tuid: never a creature's)
 const WET = () => AL.TERRAIN.STREAM;
