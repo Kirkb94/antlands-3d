@@ -1055,7 +1055,25 @@ P.drawSurface = function (ctx, cam, alpha, opacity) {
   ctx.globalAlpha = 1;
 };
 
-AL.R3D = { enabled: true, THREE, gallery: null };
+// a stand-alone ant (title screens): a THREE.Group with the species build and colours; .userData.frame(0|1|2) poses the legs
+const MODEL_GEOS = new Map();
+function antModel(colours, caste) {
+  const look = LOOK_OF(colours), lk = LOOKS[look], key = caste + '|' + look;
+  let geos = MODEL_GEOS.get(key);
+  if (!geos) { geos = antGeos(caste, look); MODEL_GEOS.set(key, geos); }
+  const bodyH = colours.body || '#5a2a14', headH = colours.head || bodyH, gasH = colours.gaster || bodyH;
+  const gaster = caste === C.HONEYPOT ? '#e9a93a' : lk && lk.amber ? Art.mix(gasH, '#e0a040', 0.35) : gasH;
+  const rough = lk && lk.gloss ? 0.14 : lk && lk.matte ? 0.62 : 0.3;
+  const mat = c => new THREE.MeshStandardMaterial({ vertexColors: true, color: col(c), roughness: rough, metalness: 0.08 });
+  const g = new THREE.Group(), add = (geo, m) => { const o = new THREE.Mesh(geo, m); o.castShadow = true; o.receiveShadow = true; g.add(o); return o; };
+  add(geos.body, mat(bodyH)); add(geos.head, mat(headH)); add(geos.gaster, mat(gaster));
+  const lm = mat(Art.shade(bodyH, -0.35)), legs = geos.legs.slice(0, 3).map(l => add(l, lm));
+  legs.forEach((l, i) => { l.visible = i === 0; });
+  if (geos.wings) add(geos.wings, new THREE.MeshStandardMaterial({ color: 0xe6f0ff, transparent: true, opacity: 0.4, roughness: 0.15, depthWrite: false, side: THREE.DoubleSide })).castShadow = false;
+  g.userData.frame = f => legs.forEach((l, i) => { l.visible = i === f; });
+  return g;
+}
+AL.R3D = { enabled: true, THREE, gallery: null, antModel, vnoise, LOOKS };
 window.addEventListener('keydown', e => {
   if (e.key === 'F8' || e.key === '\\' || e.code === 'Backslash') {   // 3D model gallery: creatures -> carcasses -> ants -> off
     e.preventDefault();
