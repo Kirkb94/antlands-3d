@@ -508,17 +508,21 @@ class R3D {
   }
   resize() { const r = this.r; if (this.cv.width !== r.w || this.cv.height !== r.h) this.gl.setSize(r.w, r.h, false); }
 
-  // a slow PC: if the game runs under ~45 fps for 4 s straight, step shadows down (high -> low -> off) for this
-  // session, with a note; the Settings choice itself isn't changed. Never kicks in on a machine that keeps up.
+  // a slow PC: if the game runs under ~45 fps for 4 s straight, step down (shadows high -> low, then the grass off,
+  // then shadows off) for this session, with a note; the Settings choices themselves aren't changed. Never kicks in
+  // on a machine that keeps up.
   governor() {
     const P = AL.Game && AL.Game.perf, now = performance.now();
-    if (!P || AL.Game.paused || AL.R3D.shadows === 'off') { this._slowSince = 0; return; }
+    if (!P || AL.Game.paused || (AL.R3D.shadows === 'off' && !AL.R3D.grass)) { this._slowSince = 0; return; }
     if (P.frameMs > 22) { if (!this._slowSince) this._slowSince = now; }
     else this._slowSince = 0;
     if (this._slowSince && now - this._slowSince > 4000) {
       this._slowSince = 0;
-      AL.R3D.shadows = AL.R3D.shadows === 'high' ? 'low' : 'off';
-      if (AL.UI && AL.UI.toast) AL.UI.toast('Running slow: 3D shadows set to ' + AL.R3D.shadows + ' (Settings to change)');
+      let msg;
+      if (AL.R3D.shadows === 'high') { AL.R3D.shadows = 'low'; msg = '3D shadows set to low'; }
+      else if (AL.R3D.grass) { AL.R3D.grass = false; msg = 'grass turned off'; }
+      else { AL.R3D.shadows = 'off'; msg = '3D shadows set to off'; }
+      if (AL.UI && AL.UI.toast) AL.UI.toast('Running slow: ' + msg + ' (Settings to change)');
     }
   }
   // ---- static scenery, rebuilt when the world changes --------------------------------------------------------
@@ -1554,7 +1558,7 @@ function antModel(colours, caste) {
   return g;
 }
 const pref = (k, d) => { try { return localStorage.getItem('antlands.' + k) || d; } catch (_) { return d; } };
-AL.R3D = { enabled: pref('3d', 'on') !== 'off', tilt: pref('tilt', 'on') !== 'off', shadows: pref('shadows', 'high'), relief: pref('relief', 'on') !== 'off', THREE, gallery: null, antModel, vnoise, LOOKS };
+AL.R3D = { enabled: pref('3d', 'on') !== 'off', tilt: pref('tilt', 'on') !== 'off', shadows: pref('shadows', 'high'), relief: pref('relief', 'on') !== 'off', grass: pref('grass', 'on') !== 'off', THREE, gallery: null, antModel, vnoise, LOOKS };
 // for add-on modules (render3d-yard.js): the geometry kit and an update hook run every 3D frame
 AL.R3D.extras = [];
 AL.R3D.hatQ = [];

@@ -164,7 +164,7 @@ const G = {
   },
   update(r3, world, v, t) {
     const P = this.parts, tl = r3.tilt, B = r3.tb;
-    const on = !!(tl && r3.ground3d && r3.ground3d.visible && B && AL.R3D.grass !== false && AL.R3D.shadows !== 'off');
+    const on = !!(tl && r3.ground3d && r3.ground3d.visible && B && AL.R3D.grass !== false);
     const z = on ? (r3.r.h / tl.vh) / (r3.r.dpr || 1) : 0;   // (screen px per world unit, as cam.z)
     if (!on || z < 0.8) { for (const p of P) p.mesh.visible = false; return; }
     if (this.world !== world) this.build(r3, world);
