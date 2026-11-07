@@ -33,9 +33,14 @@ const SHAPES = [
   { head: 1.0,  mand: 0.9, gaster: 1.2, thorax: 1.3, leg: 0.95, ant: 1.1, wings: true },
   { head: 1.0,  mand: 1.0, gaster: 1.0, thorax: 1.0, leg: 1.0,  ant: 1.0, mark: true },
 ];
+// 3D species builds: art.js's looks plus the 4 starting species, and extra parts (waist nodes, spines, hairs...)
 const LOOKS = {
+  fire:       { head: 0.92, gaster: 0.95, twoNode: true, sting: true },                                  // small heads, two-node waist, stinger
+  carpenter:  { head: 1.16, thorax: 1.12, gaster: 1.06, leg: 1.1, arched: true, gloss: true },          // big heads, arched back, shiny
+  leafcutter: { head: 1.12, leg: 1.22, twoNode: true, spines: true, matte: true },                       // spiny back and head, long legs
+  army:       { head: 1.05, mand: 1.3, gaster: 0.86, leg: 1.32, twoNode: true, sickle: true, eye: 0.4 }, // long legs, sickle jaws, near blind
   honeypot:   { gaster: 1.12, leg: 1.12, amber: true },
-  harvester:  { head: 1.18, mand: 1.1, beard: true },
+  harvester:  { head: 1.18, mand: 1.1, beard: true, square: true, twoNode: true },
   slavemaker: { head: 0.95, mand: 1.15, sickle: true, gloss: true },
   bullet:     { head: 1.1, mand: 1.25, gaster: 1.1, thorax: 1.12, leg: 1.05, sting: true, hairy: true },
 };
@@ -91,19 +96,30 @@ function antGeos(caste, look) {
   const H = ANT_Y, DK = new THREE.Color(0.03, 0.025, 0.02), MID = new THREE.Color(0.62, 0.62, 0.62);
   const thx = 0.6, thR = 1.35 * sh.thorax, thL = 2.3 * sh.thorax;
   const hx = thx + thL * 0.5 + 1.25 * sh.head, hR = 1.35 * sh.head;
-  const gx = -1.2 - 2.3 * sh.gaster, gR = 2.0 * sh.gaster, gL = 2.6 * sh.gaster;
+  const L2 = lk || {}, two = !!L2.twoNode;
+  const gx = -1.2 - (two ? 0.5 : 0) - 2.3 * sh.gaster, gR = 2.0 * sh.gaster, gL = 2.6 * sh.gaster;
   // thorax + petiole (body colour)
   const body = new Builder()
-    .add(SPH, M(thx, H + 0.15, 0, thL * 0.5 + 0.2, thR * 0.6, thR * 0.7), WHITE)
+    .add(SPH, M(thx, H + 0.15 + (L2.arched ? 0.3 : 0), 0, thL * 0.5 + 0.2, thR * (L2.arched ? 0.82 : 0.6), thR * 0.7), WHITE)
     .add(SPH, M(-0.75, H + 0.05, 0, 0.6, 0.58, 0.5), MID);
+  if (two) body.add(SPH, M(-1.35, H + 0.1, 0, 0.55, 0.6, 0.52), MID);
+  if (L2.spines) for (const s of [-1, 1]) {   // leafcutter: spines on the back
+    body.seg(V(thx + 0.7, H + thR * 0.5, s * 0.35), V(thx + 1.1, H + thR * 0.5 + 1.1, s * 0.95), 0.12, WHITE);
+    body.seg(V(thx - 0.3, H + thR * 0.45, s * 0.3), V(thx - 0.2, H + thR * 0.45 + 0.8, s * 0.7), 0.1, WHITE);
+    body.seg(V(thx - 1, H + thR * 0.3, s * 0.3), V(thx - 1.5, H + thR * 0.3 + 1, s * 0.6), 0.11, WHITE);
+  }
   if (sh.mark) body.add(SPH_LO, M(thx, H + 0.15 + thR * 0.55, 0, 0.75, 0.2, 0.6), new THREE.Color(3, 2.6, 1.9));
   if (sh.queen) for (const s of [-1, 1]) body.add(SPH_LO, M(thx - 0.6, H + 0.2 + thR * 0.4, s * thR * 0.6, 0.5, 0.2, 0.3), MID);
   // head (head colour) with black eyes
-  const head = new Builder().add(SPH, M(hx, H + 0.25, 0, hR * 1.05, hR * 0.78, hR * 0.95), WHITE);
-  for (const s of [-1, 1]) head.add(SPH_LO, M(hx + hR * 0.2, H + 0.25 + hR * 0.25, s * hR * 0.74, 0.38, 0.3, 0.28), DK);
+  const head = new Builder().add(SPH, M(hx, H + 0.25, 0, hR * (L2.square ? 0.98 : 1.05), hR * 0.78, hR * (L2.square ? 1.1 : 0.95)), WHITE);
+  const ey = L2.eye || 1;
+  for (const s of [-1, 1]) head.add(SPH_LO, M(hx + hR * 0.2, H + 0.25 + hR * 0.25, s * hR * 0.74, 0.38 * ey, 0.3 * ey, 0.28 * ey), DK);
+  if (L2.spines) for (const s of [-1, 1]) head.seg(V(hx - hR * 0.5, H + 0.25 + hR * 0.5, s * hR * 0.55), V(hx - hR * 1.05, H + 0.25 + hR * 0.95, s * hR * 0.9), 0.12, WHITE);
+  if (L2.beard) { const pale = new THREE.Color(2.4, 2.2, 1.7); for (let k = -2; k <= 2; k++) head.seg(V(hx + hR * 0.25, H - hR * 0.35, k * hR * 0.18), V(hx + hR * 0.1, H - hR * 0.35 - 0.9, k * hR * 0.22), 0.07, pale); }
   // gaster (gaster colour), its tip lifted a little; honeypots' swollen crop
   const gas = new Builder().add(SPH, M(gx, H + 0.45, 0, gL, gR * (sh.honey ? 0.9 : 0.78), gR, 0, 0, -0.1), WHITE);
-  if (lk && lk.sting) gas.seg(V(gx - gL * 0.92, H + 0.25, 0), V(gx - gL - 1.1, H + 0.05, 0), 0.14, DK);
+  if (lk && lk.sting) gas.seg(V(gx - gL * 0.92, H + 0.25, 0), V(gx - gL - (caste === C.SOLDIER || caste === C.MAJOR || L2.hairy ? 1.1 : 0.6), H + 0.05, 0), 0.14, DK);
+  if (L2.hairy) { const gold = new THREE.Color(2.2, 1.7, 1); for (let k = 0; k < 10; k++) { const ax = gx + gL * (0.7 - k * 0.15), sd = k & 1 ? 1 : -1; gas.seg(V(ax, H + 0.45 + gR * 0.6, sd * gR * 0.45), V(ax - 0.3, H + 0.45 + gR * 0.95, sd * gR * 0.7), 0.06, gold); } }
   // legs, antennae and mandibles (leg colour): one geometry per walk frame (swing 0, +1, -1)
   const legs = [0, 1, -1, 'dead'].map(swing => {
     const dead = swing === 'dead', sv = dead ? 0 : swing;   // (the 4th frame: a dead ant's legs curled up)
@@ -173,7 +189,7 @@ function flush(mesh, n) {
 class AntGroup {
   constructor(r3, geos) {
     this.r3 = r3; this.cap = 64; this.n = 0; this.nl = [0, 0, 0, 0];
-    const S = r3.scene, mat = r3.antMat;
+    const S = r3.scene, mat = geos.mat || r3.antMat;
     this.body = mkInst(geos.body, mat, this.cap, S); this.head = mkInst(geos.head, mat, this.cap, S); this.gaster = mkInst(geos.gaster, mat, this.cap, S);
     this.legs = geos.legs.map(g => mkInst(g, mat, this.cap, S));
     this.wings = geos.wings ? mkInst(geos.wings, r3.wingMat, this.cap, S, false) : null;
@@ -205,11 +221,11 @@ class AntGroup {
 }
 // a pool of one primitive (food bits, carried crumbs)
 class Pool {
-  constructor(r3, geo, mat, shadow) { this.r3 = r3; this.cap = 128; this.n = 0; this.mesh = mkInst(geo, mat, this.cap, r3.scene, shadow); }
+  constructor(r3, geo, mat, shadow) { this.r3 = r3; this.cap = 128; this.n = 0; this.yOff = 0; this.mesh = mkInst(geo, mat, this.cap, r3.scene, shadow); }
   begin() { this.n = 0; }
   put(x, y, z, a, sx, sy, sz, c) {
     if (this.n >= this.cap) { this.cap *= 2; this.mesh = growInst(this.mesh, this.cap, this.r3.scene); }
-    const i = this.n++; putM(this.mesh, i, x, y, z, Math.cos(a), Math.sin(a), sx, sy, sz); putC(this.mesh, i, c);
+    const i = this.n++; putM(this.mesh, i, x, y + this.yOff, z, Math.cos(a), Math.sin(a), sx, sy, sz); putC(this.mesh, i, c);
   }
   // a limb: a round segment from a to b (world space)
   seg(a, b, r, c) {
@@ -280,6 +296,7 @@ const CC = {
 };
 const SP_LEGS = [0.55, 1.2, 1.95, 2.6];
 const LB_SPOTS = [[-1, -2.6, 1.3], [-1, 2.6, 1.3], [-4, -1.6, 1.1], [-4, 1.6, 1.1], [1.6, -1.7, 0.9], [1.6, 1.7, 0.9], [-5.6, 0, 0.8]];
+const SPEC_COLS = {};   // gallery: each species' colours + look
 const SKIP_OVER = new Set(['world-fx', 'eco-hunters-art']);   // their 'overAnts' 2D creatures are drawn in 3D here
 
 // mound profile: a low dome with a shallow crater at the entrance (also lifts ants walking over it)
@@ -290,6 +307,59 @@ function moundY(d, R) {
   const er = Math.min(10, 5 + R * 0.06) * 1.7;
   if (d < er) { const u = d / er, k = u * u * (3 - 2 * u); h = 0.3 + (h - 0.3) * k; }
   return h;
+}
+
+// ---- terrain relief: gentle hills and dips under the painted yard -----------------------------------------------
+// A smooth height map (seeded per match): broad hills, smaller swells, fine bumps, banks around puddles. It is drawn
+// as light and shade over the painted ground (slopes facing the sun brighter, the far sides and hollows darker) and
+// catches the shadows; everything standing on the yard follows its height. Visual only: the sim stays flat.
+function vnoise(x, y, seed) {
+  const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi, u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = AL.hash2(xi, yi, seed), b = AL.hash2(xi + 1, yi, seed), c = AL.hash2(xi, yi + 1, seed), d = AL.hash2(xi + 1, yi + 1, seed);
+  return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
+}
+class Terrain {
+  constructor(S, seed) {
+    const cell = this.cell = Math.max(8, Math.ceil(Math.max(S.W, S.H) / 700));
+    const gw = this.gw = Math.ceil(S.W / cell) + 1, gh = this.gh = Math.ceil(S.H / cell) + 1, h = this.h = new Float32Array(gw * gh);
+    const wet = S.foods.filter(f => f.visual === 'water').map(f => ({ x: f.poi ? f.poi.x : f.x, y: f.poi ? f.poi.y : f.y, r: ((f.poi && f.poi.r) || f.r || 20) * 1.7 }));
+    let mn = 1e9;
+    for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
+      const x = i * cell, y = j * cell;
+      let v = 18 * vnoise(x / 560, y / 560, seed) + 7 * vnoise(x / 190, y / 190, seed + 7) + 3.2 * vnoise(x / 95, y / 95, seed + 29) + 1.6 * vnoise(x / 40, y / 40, seed + 13);
+      for (const w of wet) { const d = Math.hypot(x - w.x, y - w.y); if (d < w.r) { const u = 1 - d / w.r; v -= 7 * u * u * (3 - 2 * u); } }
+      h[j * gw + i] = v; if (v < mn) mn = v;
+    }
+    for (let k = 0; k < h.length; k++) h[k] -= mn;
+  }
+  at(x, y) {
+    const c = this.cell, gw = this.gw, gh = this.gh, H = this.h;
+    let fx = x / c, fy = y / c;
+    fx = fx < 0 ? 0 : fx > gw - 1.001 ? gw - 1.001 : fx; fy = fy < 0 ? 0 : fy > gh - 1.001 ? gh - 1.001 : fy;
+    const i = fx | 0, j = fy | 0, u = fx - i, v = fy - j, o = j * gw + i;
+    return (H[o] * (1 - u) + H[o + 1] * u) * (1 - v) + (H[o + gw] * (1 - u) + H[o + gw + 1] * u) * v;
+  }
+  geometry() {
+    const H = this.h, gw = this.gw, gh = this.gh, c = this.cell, step = Math.max(1, Math.ceil(Math.max(gw, gh) / 380)), EX = 9;   // EX: normals exaggerated so the relief reads from above
+    const nx = Math.floor((gw - 1) / step) + 1, ny = Math.floor((gh - 1) / step) + 1;
+    const pos = new Float32Array(nx * ny * 3), nor = new Float32Array(nx * ny * 3), idx = new Uint32Array((nx - 1) * (ny - 1) * 6);
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      const gi = i * step, gj = j * step, o = (j * nx + i) * 3;
+      const hl = H[gj * gw + Math.max(0, gi - 1)], hr = H[gj * gw + Math.min(gw - 1, gi + 1)], hu = H[Math.max(0, gj - 1) * gw + gi], hd = H[Math.min(gh - 1, gj + 1) * gw + gi];
+      const dx = (hr - hl) / (2 * c) * EX, dz = (hd - hu) / (2 * c) * EX, l = Math.sqrt(dx * dx + 1 + dz * dz);
+      pos[o] = gi * c; pos[o + 1] = H[gj * gw + gi]; pos[o + 2] = gj * c;
+      nor[o] = -dx / l; nor[o + 1] = 1 / l; nor[o + 2] = -dz / l;
+    }
+    let k = 0;
+    for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+      const a = j * nx + i, b = a + 1, cc = a + nx, d = cc + 1;
+      idx[k++] = a; idx[k++] = cc; idx[k++] = b; idx[k++] = b; idx[k++] = cc; idx[k++] = d;
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeBoundingSphere();
+    return g;
+  }
 }
 
 // ---- the renderer ---------------------------------------------------------------------------------------------
@@ -313,8 +383,20 @@ class R3D {
     this.shadowPlane = new THREE.Mesh(plane, new THREE.ShadowMaterial({ color: 0x1a1006, opacity: 0.42 }));
     this.shadowPlane.receiveShadow = true; this.shadowPlane.position.y = 0.01; S.add(this.shadowPlane);
     this.depth.frustumCulled = this.shadowPlane.frustumCulled = false;
+    // terrain relief: black (shade) or warm white (sun) with alpha, over the painted ground; never hides anything
+    this.reliefMat = new THREE.ShaderMaterial({
+      transparent: true, depthTest: false, depthWrite: false, uniforms: { L: { value: LIGHT_DIR } },
+      vertexShader: 'varying vec3 vN; varying float vH; void main() { vN = normal; vH = position.y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: 'uniform vec3 L; varying vec3 vN; varying float vH; void main() { vec3 n = normalize(vN); float r = dot(n, L) / L.y;' +
+        ' float d = clamp(1.0 - r, 0.0, 1.0) * 0.9 + clamp((5.0 - vH) / 5.0, 0.0, 1.0) * 0.12; float b = clamp(r - 1.0, 0.0, 1.0) * 0.8;' +
+        ' if (d >= b) gl_FragColor = vec4(0.06, 0.04, 0.02, min(d, 0.6)); else gl_FragColor = vec4(1.0, 0.86, 0.6, min(b, 0.2)); }',
+    });
+    this.terrShadowMat = new THREE.ShadowMaterial({ color: 0x1a1006, opacity: 0.42, depthTest: false, depthWrite: false });
+    this.terr = null;
     // materials
     this.antMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0.08 });
+    this.antGlossMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.14, metalness: 0.12 });
+    this.antMatteMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.62, metalness: 0.02 });
     this.wingMat = new THREE.MeshStandardMaterial({ color: 0xe6f0ff, transparent: true, opacity: 0.38, roughness: 0.15, metalness: 0, depthWrite: false, side: THREE.DoubleSide });
     this.rockMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, flatShading: true });
     this.woodMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, flatShading: true });
@@ -341,7 +423,11 @@ class R3D {
   group(caste, look) {
     const key = caste + '|' + look;
     let g = this.groups.get(key);
-    if (!g) { g = new AntGroup(this, antGeos(caste, look)); this.groups.set(key, g); }
+    if (!g) {
+      const geos = antGeos(caste, look), lk = LOOKS[look];
+      geos.mat = lk && lk.gloss ? this.antGlossMat : lk && lk.matte ? this.antMatteMat : this.antMat;
+      g = new AntGroup(this, geos); this.groups.set(key, g);
+    }
     return g;
   }
   resize() { const r = this.r; if (this.cv.width !== r.w || this.cv.height !== r.h) this.gl.setSize(r.w, r.h, false); }
@@ -355,6 +441,14 @@ class R3D {
     if (this.flowerMesh) { this.scene.remove(this.flowerMesh); this.flowerMesh.geometry.dispose(); this.flowerMesh = null; }
     this.flowerKey = -1; this.world = world;
     const S = world.surface;
+    this.terr = null;
+    try { this.terr = new Terrain(S, ((world.seed | 0) % 99991) + 17); } catch (e) { console.error('[Antlands 3D] terrain', e); }
+    if (this.terr) {
+      const g = this.terr.geometry(), rel = new THREE.Mesh(g, this.reliefMat), sh = new THREE.Mesh(g, this.terrShadowMat);
+      rel.renderOrder = -3; sh.renderOrder = -2; sh.receiveShadow = true; rel.frustumCulled = sh.frustumCulled = false;
+      this.scene.add(rel, sh); this.statics.push(rel, sh);
+    }
+    this.shadowPlane.visible = !this.terr;
     this.addStatic(this.buildRocks(S), this.rockMat);
     this.addStatic(this.buildLogs(S), this.woodMat);
   }
@@ -373,10 +467,10 @@ class R3D {
         p.setXYZ(i, x * k, y * k, z * k);
       }
       g.computeVertexNormals();
-      const h = Math.min(r.rx, r.ry) * 0.62;
-      b.add(g, M(r.x, h * 0.12, r.y, r.rx, h, r.ry, 0, -(r.rot || 0), 0), null, (x, y, z, nx, ny) => {
+      const h = Math.min(r.rx, r.ry) * 0.62, g0 = this.T(r.x, r.y);
+      b.add(g, M(r.x, h * 0.12 + g0, r.y, r.rx, h, r.ry, 0, -(r.rot || 0), 0), null, (x, y, z, nx, ny) => {
         const n = AL.hash2(Math.round(x * 0.4), Math.round(z * 0.4), seed);
-        _c.copy(dark).lerp(mid, AL.clamp(y / h + 0.3, 0, 1)).lerp(light, AL.clamp((ny - 0.55) * 1.6, 0, 1) * 0.7);
+        _c.copy(dark).lerp(mid, AL.clamp((y - g0) / h + 0.3, 0, 1)).lerp(light, AL.clamp((ny - 0.55) * 1.6, 0, 1) * 0.7);
         _c.multiplyScalar(0.88 + n * 0.24);
         if (ny > 0.35 && n > 0.78) _c.lerp(moss, 0.55);
         return _c;
@@ -391,7 +485,7 @@ class R3D {
     const bark0 = col('#7a5a3a'), bark1 = col('#4a3420'), wood = col('#c49a68'), moss = col('#6e963c');
     for (const l of S.logs) {
       const seed = (l.seed | 0) + 5, ax = Math.cos(l.rot || 0), az = Math.sin(l.rot || 0);
-      b.add(cyl, M(l.x, l.r * 0.72, l.y, l.len, l.r, l.r, 0, -(l.rot || 0), 0), null, (x, y, z, nx, ny, nz) => {
+      b.add(cyl, M(l.x, l.r * 0.72 + this.T(l.x, l.y), l.y, l.len, l.r, l.r, 0, -(l.rot || 0), 0), null, (x, y, z, nx, ny, nz) => {
         if (Math.abs(nx * ax + nz * az) > 0.85) return _c.copy(wood).multiplyScalar(0.9 + AL.hash2(Math.round(x), Math.round(z), seed) * 0.2);
         const n = AL.hash2(Math.round((x * az - z * ax) * 0.9), Math.round(y * 0.9), seed);
         _c.copy(bark1).lerp(bark0, n);
@@ -406,16 +500,16 @@ class R3D {
     const daisy = col('#f4f1e6'), dand = col('#f2c531'), dCore = col('#e8b923'), yCore = col('#d99a1c');
     for (const f of S.flowers) {
       if (f.cut) continue;
-      const s = f.s || 1, rot = f.rot || 0;
+      const s = f.s || 1, rot = f.rot || 0, g = this.T(f.x, f.y);
       if (f.kind === 'clover') {
         for (let k = 0; k < 3; k++) {
           const a = rot + (k + 1) * TAU / 3;
-          b.add(SPH_LO, M(f.x + Math.cos(a) * 4 * s, 1.6 * s, f.y + Math.sin(a) * 4 * s, 4.2 * s, 0.45 * s, 3.4 * s, 0, -a, 0), k ? c1 : c2);
+          b.add(SPH_LO, M(f.x + Math.cos(a) * 4 * s, g + 1.6 * s, f.y + Math.sin(a) * 4 * s, 4.2 * s, 0.45 * s, 3.4 * s, 0, -a, 0), k ? c1 : c2);
         }
-        b.seg(V(f.x, 0, f.y), V(f.x, 1.5 * s, f.y), 0.45 * s, stem);
+        b.seg(V(f.x, g, f.y), V(f.x, g + 1.5 * s, f.y), 0.45 * s, stem);
       } else {
-        const top = 4.2 * s, d = f.kind === 'daisy';
-        b.seg(V(f.x, 0, f.y), V(f.x, top, f.y), 0.55 * s, stem);
+        const top = g + 4.2 * s, d = f.kind === 'daisy';
+        b.seg(V(f.x, g, f.y), V(f.x, top, f.y), 0.55 * s, stem);
         for (let k = 0; k < 10; k++) {
           const a = rot + (k + 1) * TAU / 10;
           b.add(SPH_LO, M(f.x + Math.cos(a) * 4.2 * s, top + 0.2 * s, f.y + Math.sin(a) * 4.2 * s, 3.4 * s, 0.45 * s, 1.25 * s, 0, -a, 0.12), d ? daisy : dand);
@@ -440,14 +534,15 @@ class R3D {
     const NR = 26, NA = 72, pos = [], cols = [], idx = [];
     const light = col('#b48a5a'), mid = col('#8d6a42'), dark = col('#5e442a'), hole = col('#140b05'), rim = col('#a07a4c');
     const er = Math.min(10, 5 + R * 0.06);
-    pos.push(c.x, moundY(0, R), c.y); cols.push(hole.r, hole.g, hole.b);
+    pos.push(c.x, moundY(0, R) + this.T(c.x, c.y), c.y); cols.push(hole.r, hole.g, hole.b);
     for (let i = 1; i <= NR; i++) for (let j = 0; j < NA; j++) {
       const a = j / NA * TAU, t = i / NR, ws = j / NA * 12, w0 = Math.floor(ws), wf = ws - w0, wu = wf * wf * (3 - 2 * wf);
       const wob = 1 + ((AL.hash2(w0 % 12, 5, c.id + 3) * (1 - wu) + AL.hash2((w0 + 1) % 12, 5, c.id + 3) * wu) - 0.5) * 0.16 * t;
       const d = t * R * 1.05 * wob, n = AL.hash2(i * 3 + 1, j * 7 + 2, c.id * 13 + 1);
       let y = moundY(d / wob, R) + (n - 0.5) * 1.1 * t * (1 - t) * 4 * Math.min(1, R / 30);
       if (i === NR) y = 0;
-      pos.push(c.x + Math.cos(a) * d, Math.max(0, y), c.y + Math.sin(a) * d);
+      const px = c.x + Math.cos(a) * d, pz = c.y + Math.sin(a) * d;
+      pos.push(px, Math.max(0, y) + this.T(px, pz), pz);
       const lit = (-Math.cos(a) - Math.sin(a)) * 0.5 * t;   // upper-left side catches the light
       _c.copy(light).lerp(mid, AL.clamp(t * 1.3 - 0.1, 0, 1)).lerp(dark, AL.clamp((t - 0.6) * 2.2, 0, 1));
       _c.multiplyScalar(0.85 + n * 0.3 + lit * 0.15);
@@ -490,8 +585,9 @@ class R3D {
       const m = L[k], dx = x - m.x, dy = y - m.y, R = m.R * 1.05;
       if (dx * dx + dy * dy < R * R) { const v = moundY(Math.sqrt(dx * dx + dy * dy), m.R); if (v > h) h = v; }
     }
-    return h;
+    return h + this.T(x, y);
   }
+  T(x, y) { return this.terr ? this.terr.at(x, y) : 0; }   // terrain height
 
   // ---- food that stands up off the ground -----------------------------------------------------------------
   updateFoods(world, v) {
@@ -502,6 +598,7 @@ class R3D {
       const mg = (f.r || 8) + 40;
       if (f.x + mg < v.x0 || f.x - mg > v.x1 || f.y + mg < v.y0 || f.y - mg > v.y1) continue;
       if (!is3DFood(f)) continue;
+      B.yOff = Ch.yOff = this.T(f.x, f.y);
       const frac = f.max ? AL.clamp(f.amount / f.max, 0, 1) : 1;
       switch (f.visual) {
         case 'fruit': {
@@ -566,7 +663,7 @@ class R3D {
         }
       }
     }
-    B.end(); Ch.end();
+    B.yOff = Ch.yOff = 0; B.end(); Ch.end();
   }
 
   // ---- ants ----------------------------------------------------------------------------------------------------
@@ -588,7 +685,7 @@ class R3D {
       const pal = palOf(this, cc.colours || cc.sp, caste);
       const s = CS[caste].size * (cc.sp.size || 1) * (SZ ? SZ[i] : 1) * (ANT_SCALE / 11);
       const a = ANG[i], ca = Math.cos(a), sa = Math.sin(a);
-      const h = hasMounds ? this.heightAt(x, y) : 0;
+      const h = hasMounds || this.terr ? this.heightAt(x, y) : 0;
       pal.group.put(x, h, y, ca, sa, s, FR[(AN[i] | 0) & 3], pal);
       const k = CR[i];
       if (k) {
@@ -789,6 +886,19 @@ class R3D {
       (pg === 0 ? live : dead).forEach(([name, fn], i) => { const [x, y] = at(i, 5, 52, 84, 2); this.frame(x, y, spin + i, 1.1); fn(); L.push({ x, y: y + 30, text: name }); });
       return;
     }
+    if (pg === 3) {   // every species: worker on top, soldier in the middle, major below
+      const keys = Object.keys(AL.SPECIES || {}).filter(k => AL.SPECIES[k] && AL.SPECIES[k].body), FR4 = [0, 1, 0, 2];
+      r.cam.z = 3.0;
+      keys.forEach((key, i) => {
+        const sp = AL.SPECIES[key], cols = SPEC_COLS[key] || (SPEC_COLS[key] = Object.assign({}, sp, { look: sp.look || key }));
+        [C.WORKER, C.SOLDIER, C.MAJOR].forEach((ca, row) => {
+          const x = cx + (i - (keys.length - 1) / 2) * 30, y = cy + (row - 1) * 46 - 10, pal = palOf(this, cols, ca), s = AL.CASTES[ca].size * (sp.size || 1), a = -Math.PI / 2 + Math.sin(spin + i) * 0.4;
+          pal.group.put(x, this.heightAt(x, y), y, Math.cos(a), Math.sin(a), s, FR4[((t * 8) | 0) & 3], pal);
+        });
+        L.push({ x: cx + (i - (keys.length - 1) / 2) * 30, y: cy + 68, text: (sp.name || key).replace(/ ants$/, '') });
+      });
+      return;
+    }
     const cc = world.colonies[world.me || 0], rv = world.colonies.find(c => c && c !== cc) || cc;
     const show = [[cc, 0], [cc, 1], [cc, 2], [cc, 3], [cc, 4], [cc, 5], [cc, 6], [cc, 7], [cc, 8], [cc, 9], [rv, 0], [rv, 3], [rv, 4], [rv, 7], [cc, -1]];
     const FR = [0, 1, 0, 2];
@@ -950,8 +1060,8 @@ window.addEventListener('keydown', e => {
   if (e.key === 'F8' || e.key === '\\' || e.code === 'Backslash') {   // 3D model gallery: creatures -> carcasses -> ants -> off
     e.preventDefault();
     const g = AL.R3D.gallery;
-    AL.R3D.gallery = g == null ? 0 : g < 2 ? g + 1 : null;
-    if (AL.UI && AL.UI.toast) AL.UI.toast(AL.R3D.gallery == null ? '3D gallery off [F8]' : '3D gallery: ' + ['creatures', 'carcasses', 'ants'][AL.R3D.gallery] + ' [F8]');
+    AL.R3D.gallery = g == null ? 0 : g < 3 ? g + 1 : null;
+    if (AL.UI && AL.UI.toast) AL.UI.toast(AL.R3D.gallery == null ? '3D gallery off [F8]' : '3D gallery: ' + ['creatures', 'carcasses', 'ants', 'species'][AL.R3D.gallery] + ' [F8]');
     return;
   }
   if (e.key !== 'F7') return;
