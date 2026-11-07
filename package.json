@@ -1,0 +1,9 @@
+{
+  "name": "antlands-3d",
+  "version": "0.1.0",
+  "description": "Antlands 3D: the Antlands ant colony sim / RTS with a Three.js renderer.",
+  "main": "server.js",
+  "scripts": { "start": "node server.js", "test": "node --test" },
+  "dependencies": { "three": "^0.170.0" },
+  "engines": { "node": ">=18" }
+}

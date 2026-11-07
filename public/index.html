@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#120d08">
+<title>Antlands 3D</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<div id="hud" hidden>
+  <div id="topbar">
+    <div class="panel" id="clock" hidden></div>
+  </div>
+  <div id="left">
+    <div class="panel" id="stocks"></div>
+    <div class="panel" id="pop"></div>
+    <div class="panel" id="nestStats"></div>
+  </div>
+  <div id="right">
+    <div class="panel row" id="speed">
+      <button data-speed="0" data-tip="Pause [Space]">&#10074;&#10074;</button><button data-speed="1" data-tip="Normal speed [1]">1&times;</button><button data-speed="2" data-tip="Fast [2]">2&times;</button><button data-speed="4" data-tip="Fastest [3]">4&times;</button>
+      <button id="btnMenu" data-tip="Menu [Esc]">&#9776;</button>
+    </div>
+    <div class="panel" id="eggPanel">
+      <div class="ph"><span data-tip="You choose each egg the queen lays. Larvae need protein; soldiers and majors need more.">Egg queue</span><span class="mute"><span id="broodN">0</span> brood</span></div>
+      <div id="eggBtns"></div>
+      <div id="eggQueue"></div>
+      <label class="auto" data-tip="When the queue is empty the queen keeps laying a balanced mix."><input type="checkbox" id="eggAuto" checked> Auto mix when empty</label>
+    </div>
+    <canvas id="minimap" width="200" height="150" hidden></canvas>
+  </div>
+  <div id="bottom">
+    <div class="panel row sub" id="chambers" hidden></div>
+    <div class="row" id="orders"></div>
+    <div class="panel row sub" id="collectN" hidden><span class="mute">Ants</span><button data-n="10" class="on">10</button><button data-n="25">25</button><button data-n="50">50</button><button data-n="100">100</button></div>
+    <div class="row">
+      <div class="panel row" id="tools"></div>
+      <button class="panel" id="btnRecall" data-tip="Mower alarm [U]: every ant on the surface runs home and stays in the nest. Sounded while the mower is coming, it clears itself when the mower is done. Press again to call it off.">Mower alarm [U]</button>
+      <button class="panel" id="btnView" data-tip="Zoom between the yard and the nest under your mound (mouse wheel over the mound works too)">Nest [Tab]</button>
+      <button class="panel" id="btnBench" data-tip="Benchmark: fill the yard to 5,000 ants and show fps [F9]">5k</button>
+    </div>
+  </div>
+</div>
+<div id="tooltip" hidden></div>
+<div id="inspect" hidden></div>
+<div id="toasts"></div>
+<div id="perf" hidden></div>
+
+<script src="al.js"></script>
+<script src="data.js"></script>
+<script src="pheromone.js"></script>
+<script src="ants.js"></script>
+<script src="surface.js"></script>
+<script src="colony.js"></script>
+<script src="colonies.js"></script>
+<script src="behavior.js"></script>
+<script src="terrain.js"></script>
+<script src="sim.js"></script>
+<script src="nest.js"></script>
+<script src="hunger.js"></script>
+<script src="nestclimate.js"></script>
+<script src="life.js"></script>
+<script src="injury.js"></script>
+<script src="combat.js"></script>
+<script src="orders.js"></script>
+<script src="ai.js"></script>
+<script src="ai-nest.js"></script>
+<script src="bivouac.js"></script>
+<script src="swarm.js"></script>
+<script src="fog.js"></script>
+<script src="founding-sites.js"></script>
+<script src="founding.js"></script>
+<script src="founding-race.js"></script>
+<script src="species.js"></script>
+<script src="flight.js"></script>
+<script src="expansion.js"></script>
+<script src="research.js"></script>
+<script src="victory.js"></script>
+<script src="world-time.js"></script>
+<script src="world-poi.js"></script>
+<script src="world-creatures.js"></script>
+<script src="eco.js"></script>
+<script src="eco-hunters.js"></script>
+<script src="world-fog.js"></script>
+<script src="campaign.js"></script>
+<script src="brush.js"></script>
+<script src="cmd.js"></script>
+<script src="raids.js"></script>
+<script src="aphids.js"></script>
+<script src="links.js"></script>
+<script src="nestplan.js"></script>
+<script src="art.js"></script>
+<script src="render.js"></script>
+<script src="render-nest.js"></script>
+<script src="render-bivouac.js"></script>
+<script src="render-bars.js"></script>
+<script src="bivouac-ui.js"></script>
+<script src="eco-ui.js"></script>
+<script src="ui-markers.js"></script>
+<script src="input.js"></script>
+<script src="tools.js"></script>
+<script src="ui.js"></script>
+<script src="ui-game.js"></script>
+<script src="ui-screens.js"></script>
+<script src="map-ui.js"></script>
+<script src="ui-settings.js"></script>
+<script src="species-ui.js"></script>
+<script src="ui-hints.js"></script>
+<script src="audio.js"></script>
+<script src="flight-scene.js"></script>
+<script src="founding-scene.js"></script>
+<script src="expansion-art.js"></script>
+<script src="expansion-ui.js"></script>
+<script src="kp-alerts.js"></script>
+<script src="research-ui.js"></script>
+<script src="world-art.js"></script>
+<script src="eco-hunters-art.js"></script>
+<script src="world-fx.js"></script>
+<script src="combat-fx.js"></script>
+<script src="fight-inset.js"></script>
+<script src="nest-switch.js"></script>
+<script src="raids-ui.js"></script>
+<script src="deepnest-ui.js"></script>
+<script src="nestclimate-ui.js"></script>
+<script src="nestplan-ui.js"></script>
+<script src="campaign-ui.js"></script>
+<script src="snap.js"></script>
+<script src="net.js"></script>
+<script src="mp-ui.js"></script>
+<script src="phone-ui.js"></script>
+<script src="main.js"></script>
+<script type="module" src="render3d.js"></script>
+</body>
+</html>

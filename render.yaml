@@ -1,0 +1,14 @@
+# Render.com blueprint: one free web service runs server.js (the game files plus multiplayer rooms).
+# Deploy: in Render, New > Blueprint, pick this repo. Players open the service's URL and press Multiplayer.
+services:
+  - type: web
+    name: antlands-3d
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      - key: MP_KEY            # signs match start messages so a match can be restored after a restart; generated once
+        generateValue: true
