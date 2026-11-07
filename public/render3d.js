@@ -442,7 +442,7 @@ class R3D {
     this.flowerKey = -1; this.world = world;
     const S = world.surface;
     this.terr = null;
-    try { this.terr = new Terrain(S, ((world.seed | 0) % 99991) + 17); } catch (e) { console.error('[Antlands 3D] terrain', e); }
+    if (AL.R3D.relief) try { this.terr = new Terrain(S, ((world.seed | 0) % 99991) + 17); } catch (e) { console.error('[Antlands 3D] terrain', e); }
     if (this.terr) {
       const g = this.terr.geometry(), rel = new THREE.Mesh(g, this.reliefMat), sh = new THREE.Mesh(g, this.terrShadowMat);
       rel.renderOrder = -3; sh.renderOrder = -2; sh.receiveShadow = true; rel.frustumCulled = sh.frustumCulled = false;
@@ -915,6 +915,12 @@ class R3D {
     const r = this.r, world = r.world, S = world.surface;
     if (this.world !== world) this.setWorld(world);
     this.resize();
+    const shq = AL.R3D.shadows;   // settings: shadow quality
+    if (shq !== this._shq) {
+      this._shq = shq; const n = shq === 'low' ? 1536 : 4096;
+      this.sun.castShadow = shq !== 'off'; this.sun.shadow.mapSize.set(n, n);
+      if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
+    }
     const vw = view.x1 - view.x0, vh = view.y1 - view.y0, cx = cam.x, cy = cam.y;
     // camera straight down, lens fitted so the ground plane matches the 2D view rect exactly
     const D = (vh / 2) / TAN, c3 = this.cam;
@@ -1073,7 +1079,8 @@ function antModel(colours, caste) {
   g.userData.frame = f => legs.forEach((l, i) => { l.visible = i === f; });
   return g;
 }
-AL.R3D = { enabled: true, THREE, gallery: null, antModel, vnoise, LOOKS };
+const pref = (k, d) => { try { return localStorage.getItem('antlands.' + k) || d; } catch (_) { return d; } };
+AL.R3D = { enabled: pref('3d', 'on') !== 'off', shadows: pref('shadows', 'high'), relief: pref('relief', 'on') !== 'off', THREE, gallery: null, antModel, vnoise, LOOKS };
 window.addEventListener('keydown', e => {
   if (e.key === 'F8' || e.key === '\\' || e.code === 'Backslash') {   // 3D model gallery: creatures -> carcasses -> ants -> off
     e.preventDefault();
@@ -1085,5 +1092,6 @@ window.addEventListener('keydown', e => {
   if (e.key !== 'F7') return;
   e.preventDefault();
   AL.R3D.enabled = !AL.R3D.enabled;
+  try { localStorage.setItem('antlands.3d', AL.R3D.enabled ? 'on' : 'off'); } catch (_) { /* private mode */ }
   if (AL.UI && AL.UI.toast) AL.UI.toast(AL.R3D.enabled ? '3D models on [F7]' : 'Classic 2D sprites [F7]');
 });
