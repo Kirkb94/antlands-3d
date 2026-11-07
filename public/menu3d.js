@@ -330,6 +330,11 @@ function mountUI() {
       syncSettings();
     });
   }
+  // the game's name: big and bold across the top of the screen, out of the panel
+  const ov = $('title');
+  if (ov && !$('bigTitle')) { const bt = document.createElement('div'); bt.id = 'bigTitle'; ov.appendChild(bt); }
+  const bt = $('bigTitle');
+  if (bt) for (const el of [...sheet.children]) if (el.tagName === 'H1' || el.classList.contains('kicker')) bt.appendChild(el);
   // everything else in the panel lives on the Play tab (also bits other modules add later)
   const keep = new Set(['tTabs', 'tPlay', 'tSettings', 'tCos']), play = $('tPlay');
   for (const el of [...sheet.children]) if (!keep.has(el.id) && el.tagName !== 'H1' && !el.classList.contains('kicker')) play.appendChild(el);
@@ -358,6 +363,12 @@ body.m3d .ov.title{background:linear-gradient(90deg,rgba(14,8,3,.6),rgba(14,8,3,
 body.m3d .sheet.hero{overflow-x:hidden;background:rgba(26,16,8,.58);border-color:rgba(255,200,120,.28)}
 body.m3d .sheet.hero h1{color:#ffd27a;text-shadow:0 0 30px rgba(255,170,60,.6),0 3px 0 rgba(0,0,0,.4)}
 body.m3d .kicker{color:#ffb070}
+#bigTitle{display:none}
+body.m3d .ov.title{padding-top:clamp(96px,17vh,190px)}
+body.m3d .ov.title .sheet.hero{max-height:calc(100vh - clamp(96px,17vh,190px) - 14px)}
+body.m3d #bigTitle{display:block;position:absolute;left:0;right:0;top:0;padding:clamp(8px,2vh,22px) 16px 0;text-align:center;pointer-events:none;z-index:3;background:linear-gradient(180deg,rgba(14,8,3,.55),rgba(14,8,3,0))}
+body.m3d #bigTitle h1{margin:0;font:900 clamp(56px,11vw,160px)/0.95 Georgia,"Times New Roman",serif;letter-spacing:.04em;color:#ffd27a;-webkit-text-stroke:1.5px rgba(70,30,6,.55);text-shadow:0 0 40px rgba(255,160,50,.55),0 5px 0 rgba(60,24,4,.7),0 10px 26px rgba(0,0,0,.55)}
+body.m3d #bigTitle .kicker{margin:0 0 2px;font-size:clamp(11px,1.3vw,16px);letter-spacing:.32em;font-weight:700;color:#ffc488;text-shadow:0 2px 6px rgba(0,0,0,.6)}
 #tTabs{display:flex;gap:2px;margin:2px 0 14px;border-bottom:1px solid rgba(255,210,150,.18)}
 #tTabs button{background:none;border:none;border-bottom:2px solid transparent;border-radius:0;padding:6px 16px;font-weight:650;color:#c9b48e;box-shadow:none}
 #tTabs button.on{color:#ffd27a;border-bottom-color:#ffd27a}
