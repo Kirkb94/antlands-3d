@@ -87,11 +87,20 @@ function waterGeo(r3, S) {
     for (let dj = -1; dj <= 0; dj++) for (let di = -1; di <= 0; di++) { const ci = i + di, cj = j + dj; if (ci < 0 || cj < 0 || ci >= gw || cj >= gh) continue; k++; if (wet(cj * gw + ci)) n++; }
     wv[j * vw + i] = k ? n / k : 0;
   }
+  // how far each water cell is from the bank (chamfer distance, in cells): deep in the middle, shallow at the edges
+  const dist = new Float32Array(gw * gh);
+  for (let i = 0; i < gw * gh; i++) dist[i] = wet(i) ? 1e6 : 0;
+  const relax = (i, j, di, dj, w) => { const a = i + di, b = j + dj; if (a < 0 || b < 0 || a >= gw || b >= gh) return; const k = j * gw + i, v = dist[b * gw + a] + w; if (v < dist[k]) dist[k] = v; };
+  for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) { relax(i, j, -1, 0, 1); relax(i, j, 0, -1, 1); relax(i, j, -1, -1, 1.414); relax(i, j, 1, -1, 1.414); }
+  for (let j = gh - 1; j >= 0; j--) for (let i = gw - 1; i >= 0; i--) { relax(i, j, 1, 0, 1); relax(i, j, 0, 1, 1); relax(i, j, 1, 1, 1.414); relax(i, j, -1, 1, 1.414); }
   const pos = [], cols = [], idx = [], map = new Int32Array(vw * vh).fill(-1);
   const vert = (i, j) => {
     const o = j * vw + i; if (map[o] >= 0) return map[o];
     const x = i * cell, z = j * cell, a = wv[o];
-    map[o] = pos.length / 3; pos.push(x, r3.T(x, z) + 0.9, z); cols.push(1, 1, 1, Math.pow(a, 0.8));
+    let dsum = 0, dn = 0;
+    for (let dj = -1; dj <= 0; dj++) for (let di = -1; di <= 0; di++) { const ci = i + di, cj = j + dj; if (ci < 0 || cj < 0 || ci >= gw || cj >= gh) continue; dn++; if (wet(cj * gw + ci)) dsum += Math.min(dist[cj * gw + ci], 60) - 0.5; }
+    const depth = dn ? Math.max(0, dsum / dn) * cell : 0;   // (world units from the bank)
+    map[o] = pos.length / 3; pos.push(x, r3.T(x, z) + 0.9, z); cols.push(Math.min(1, depth / 255), 1, 1, Math.pow(a, 0.8));
     return map[o];
   };
   for (let j = 0; j < gh; j++) for (let i = 0; i < gw; i++) {
@@ -105,14 +114,97 @@ function waterGeo(r3, S) {
   return g;
 }
 
+// the water itself (shader-dev): sharp-crested waves summed in many directions, each octave dragged by the last so
+// ripples bunch up; Schlick Fresnel against a sky colour; a sun glint; colour from shallow (the bed showing through,
+// with caustics) to deep by the distance from the bank; broken foam along the banks; see-through at the very edge.
+// Lit by hand to match the painted ground (not tone mapped).
+const WATER_VS = `
+varying vec3 vW; varying float vA; varying float vD;
+#include <fog_pars_vertex>
+void main() {
+  vec3 p = position;
+#ifdef PUDDLE
+  float r = length(position.xz);
+  vD = (1.0 - r) * 26.0; vA = smoothstep(1.0, 0.82, r);
+#else
+  vD = color.r * 255.0; vA = color.a;
+#endif
+  vec4 wp = modelMatrix * vec4(p, 1.0);
+#ifdef USE_INSTANCING
+  wp = modelMatrix * instanceMatrix * vec4(p, 1.0);
+#endif
+  vW = wp.xyz;
+  vec4 mvPosition = viewMatrix * wp;
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
+}`;
+const WATER_FS = `
+uniform float uTime; uniform vec3 uL;
+varying vec3 vW; varying float vA; varying float vD;
+#include <fog_pars_fragment>
+vec3 lin(vec3 c) { return pow(c, vec3(2.2)); }
+float h21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vn(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(h21(i), h21(i + vec2(1.0, 0.0)), u.x), mix(h21(i + vec2(0.0, 1.0)), h21(i + vec2(1.0, 1.0)), u.x), u.y); }
+void main() {
+  vec2 p = vW.xz; float t = mod(uTime, 1000.0);
+  // waves: exp(sin) crests, 9 octaves, position dragged by each octave's slope
+  vec2 g = vec2(0.0), pp = p; float h = 0.0, ws = 0.0, a = 1.0, f = 0.11, sp = 1.5, ang = 0.0;
+  for (int i = 0; i < 9; i++) {
+    vec2 d = vec2(sin(ang), cos(ang));
+    float x = dot(d, pp) * f + t * sp, w = exp(sin(x) - 1.0), dx = w * cos(x);
+    pp -= d * dx * a * 0.38;
+    h += w * a; g += d * dx * a * f; ws += a;
+    a *= 0.8; f *= 1.18; sp *= 1.07; ang += 1.93;
+  }
+  h /= ws; g /= ws;
+  vec3 V = normalize(cameraPosition - vW);
+  float far = smoothstep(200.0, 1600.0, length(cameraPosition - vW));
+  vec3 N = normalize(vec3(-g.x * 9.0 * (1.0 - far * 0.7), 1.0, -g.y * 9.0 * (1.0 - far * 0.7)));
+  float ndv = max(dot(N, V), 0.0);
+  float F = 0.03 + 0.97 * pow(1.0 - ndv, 5.0);
+  float depth = 1.0 - exp(-vD / 22.0);
+  vec3 shallow = lin(vec3(0.32, 0.45, 0.36)), deep = lin(vec3(0.08, 0.22, 0.28));
+  vec3 body = mix(shallow, deep, depth);
+  body *= 0.82 + 0.3 * h;                                            // crests a little brighter
+  // caustics on the bed, fading with depth
+  vec2 q = p * 0.16 + vec2(t * 0.25, -t * 0.18);
+  float cn = vn(q + 2.0 * vec2(vn(q * 0.7 + t * 0.1), vn(q * 0.7 + 5.2)));
+  float ca = pow(1.0 - abs(cn * 2.0 - 1.0), 7.0);
+  body += lin(vec3(0.85, 0.95, 0.8)) * ca * 0.22 * (1.0 - depth);
+  // sky reflection and the sun
+  vec3 R = reflect(-V, N);
+  vec3 sky = mix(lin(vec3(0.78, 0.86, 0.92)), lin(vec3(0.42, 0.62, 0.84)), clamp(R.y, 0.0, 1.0));
+  vec3 c = mix(body, sky, clamp(F + 0.1, 0.0, 1.0));
+  float sp2 = pow(max(dot(R, uL), 0.0), 320.0);
+  c += lin(vec3(1.0, 0.96, 0.85)) * sp2 * 2.6;
+  // foam: a broken band along the banks, drifting
+  float shore = 1.0 - smoothstep(0.0, 5.0, vD);
+  float fn = vn(p * 0.28 + vec2(t * 0.35, t * 0.12)) * 0.6 + vn(p * 0.8 - t * 0.25) * 0.4;
+  float foam = smoothstep(0.55, 0.8, fn + shore * 0.55) * shore;
+  c = mix(c, lin(vec3(0.86, 0.9, 0.86)), foam * 0.5);
+  float al = mix(0.7, 0.94, depth) + F * 0.4 + sp2;
+  al = max(al, foam * 0.7) * smoothstep(0.0, 0.55, vA);
+  gl_FragColor = vec4(c, clamp(al, 0.0, 1.0));
+  #include <colorspace_fragment>
+  #include <fog_fragment>
+}`;
+function waterMat(puddle) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 }, uL: { value: KIT.LIGHT_DIR }, fogColor: { value: new THREE.Color() }, fogNear: { value: 1 }, fogFar: { value: 2000 }, fogDensity: { value: 0 } },
+    vertexShader: WATER_VS, fragmentShader: WATER_FS, defines: puddle ? { PUDDLE: 1 } : {},
+    transparent: true, depthWrite: false, vertexColors: !puddle, fog: true,
+  });
+}
+
 const Y = {
   id: 'yard3d',
   init(r3) {
     this.r3 = r3; this.world = null; this.meshes = [];
     this.stoneMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0 });
     this.clothMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
-    this.waterMat = new THREE.MeshStandardMaterial({ color: 0x5a9ac8, vertexColors: true, transparent: true, opacity: 0.55, roughness: 0.06, metalness: 0.35, depthWrite: false });
-    this.puddleMat = new THREE.MeshStandardMaterial({ color: 0x6aa6d0, transparent: true, opacity: 0.5, roughness: 0.05, metalness: 0.35, depthWrite: false });
+    this.waterMat = waterMat(false);
+    this.puddleMat = waterMat(true);
     this.puddles = new Pool(r3, DISC, this.puddleMat, false);
   },
   build(r3, world) {
@@ -126,8 +218,9 @@ const Y = {
     const wm = add(waterGeo(r3, S), this.waterMat, false, false);
     if (wm) wm.renderOrder = 2;
   },
-  update(r3, world, v) {
+  update(r3, world, v, t) {
     if (this.world !== world) this.build(r3, world);
+    this.waterMat.uniforms.uTime.value = this.puddleMat.uniforms.uTime.value = t;
     // puddles: the painted bed stays; a shiny surface over it, shrinking as it dries
     const P = this.puddles; P.begin();
     const S = world.surface;

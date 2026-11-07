@@ -232,6 +232,7 @@ function drawNest3D(ctx, cam, alpha, opacity) {
   } finally { this.w = W0; this.h = H0; this.dpr = D0; this.drawNestAnts = ants; this.layer = layer; this.drawChamberLabels = labels; delete this.drawNestContents; }
   // 2. the 3D: hide the yard's sheets, light the nest, put the ants, render
   if (r3.ground3d) r3.ground3d.visible = r3.over3d.visible = false;
+  r3.scene.fog = null;
   r3.depth.visible = false; r3.shadowPlane.visible = false;
   S.block.mesh.visible = S.block.shadow.visible = true;
   S.mat.map = B.ut; S.mat.needsUpdate = S.mat.map !== S._map; S._map = B.ut;

@@ -433,7 +433,25 @@ class R3D {
     // and laid on the ground as textures; uv = world units, mapped onto the canvas by the texture's offset / repeat
     this.tilt = null; this.tb = null;
     this.groundMat = new THREE.MeshBasicMaterial({ toneMapped: false });
-    this.overMat = new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true, depthTest: false, depthWrite: false });
+    // close up, the painted sheet runs out of pixels: world-space detail on top (shader-dev: a slow FBM tint so no two
+    // stretches of lawn match, and fine grain that stays sharp however near the camera gets)
+    this.groundMat.onBeforeCompile = sh => {
+      sh.vertexShader = 'varying vec3 vWp;\n' + sh.vertexShader.replace('#include <project_vertex>', '#include <project_vertex>\n  vWp = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      sh.fragmentShader = 'varying vec3 vWp;\n' +
+        'float gh21(vec2 p) { p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }\n' +
+        'float gvn(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f); return mix(mix(gh21(i), gh21(i + vec2(1.0, 0.0)), u.x), mix(gh21(i + vec2(0.0, 1.0)), gh21(i + vec2(1.0, 1.0)), u.x), u.y); }\n' +
+        'float gfbm(vec2 p) { float v = 0.0, a = 0.5; mat2 r = mat2(0.8, 0.6, -0.6, 0.8); for (int i = 0; i < 4; i++) { v += a * gvn(p); p = r * p * 2.03; a *= 0.5; } return v; }\n' +
+        sh.fragmentShader.replace('#include <map_fragment>', '#include <map_fragment>\n' +
+        '  { vec2 wp = vWp.xz; float m = gfbm(wp * 0.0045); float dry = smoothstep(0.5, 0.8, gfbm(wp * 0.0021 + 31.0));\n' +
+        '    float fine = gvn(wp * 0.9) * 0.55 + gvn(wp * 2.3) * 0.45; float cv = length(cameraPosition - vWp); float nearK = 1.0 - smoothstep(250.0, 900.0, cv);\n' +
+        '    vec3 c = diffuseColor.rgb; float gr = clamp((c.g - max(c.r, c.b)) * 6.0, 0.0, 1.0);\n' +
+        '    c *= 0.88 + 0.24 * m; c = mix(c, c * vec3(1.18, 1.06, 0.7), dry * gr * 0.45);\n' +
+        '    c *= 1.0 + (fine - 0.5) * 0.22 * nearK; diffuseColor.rgb = c; }');
+    };
+    this.groundMat.customProgramCacheKey = () => 'groundDetail';
+    this.overMat = new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true, depthTest: false, depthWrite: false, fog: false });
+    // tilted view: a little air between the camera and the far side of the yard
+    this.fogObj = new THREE.Fog(0xc9d3cf, 1, 1000);
     this.ground3d = null; this.over3d = null;
     // materials
     this.antMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0.08 });
@@ -443,8 +461,10 @@ class R3D {
     this.rockMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.92, metalness: 0, flatShading: true });
     this.woodMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, flatShading: true });
     this.plantMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0, side: THREE.DoubleSide });
-    this.soilMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0 });
-    this.deadSoilMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, color: 0x8a8a8a });
+    // (pulled forward in depth: the mound's foot and its entrance sit right at ground level, and must win over the
+    // tilted view's ground sheet there)
+    this.soilMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+    this.deadSoilMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, color: 0x8a8a8a, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
     this.blobMat = new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.02 });
     this.chunkMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0, flatShading: true });
     this.groups = new Map(); this.legMats = new Map();
@@ -650,23 +670,33 @@ class R3D {
   }
 
   // ---- mounds: a soil dome per colony, rebuilt when it grows ---------------------------------------------------
+  // the mound: a heap of excavated soil. Lumpy (smooth noise in two sizes, not per-vertex spikes), dry and pale on
+  // the crest, damp and dark down the skirt and round the entrance, speckled with fresh pellets, with run-off
+  // gullies down its sides; then a scatter of loose crumbs and pellets lying on it (flat-shaded little stones)
   moundGeo(c, R) {
-    const NR = 26, NA = 72, pos = [], cols = [], idx = [];
-    const light = col('#b48a5a'), mid = col('#8d6a42'), dark = col('#5e442a'), hole = col('#140b05'), rim = col('#a07a4c');
-    const er = Math.min(10, 5 + R * 0.06);
+    const NR = 34, NA = 112, pos = [], cols = [], idx = [], seed = (c.id | 0) * 13 + 7;
+    const light = col('#a67b4f'), mid = col('#7f5d3c'), dark = col('#4e3823'), damp = col('#3e2b1b'), hole = col('#120a04'), rim = col('#6a4c2f'), fresh = col('#c49a6a');
+    const er = Math.min(10, 5 + R * 0.06), amp = Math.min(1, R / 30);
+    const lump = (x, z) => (vnoise(x / 7, z / 7, seed) - 0.5) * 3.2 + (vnoise(x / 2.6, z / 2.6, seed + 5) - 0.5) * 1.3;
     pos.push(c.x, moundY(0, R) + this.T(c.x, c.y), c.y); cols.push(hole.r, hole.g, hole.b);
     for (let i = 1; i <= NR; i++) for (let j = 0; j < NA; j++) {
       const a = j / NA * TAU, t = i / NR, ws = j / NA * 12, w0 = Math.floor(ws), wf = ws - w0, wu = wf * wf * (3 - 2 * wf);
       const wob = 1 + ((AL.hash2(w0 % 12, 5, c.id + 3) * (1 - wu) + AL.hash2((w0 + 1) % 12, 5, c.id + 3) * wu) - 0.5) * 0.16 * t;
       const d = t * R * 1.05 * wob, n = AL.hash2(i * 3 + 1, j * 7 + 2, c.id * 13 + 1);
-      let y = moundY(d / wob, R) + (n - 0.5) * 1.1 * t * (1 - t) * 4 * Math.min(1, R / 30);
-      if (i === NR) y = 0;
       const px = c.x + Math.cos(a) * d, pz = c.y + Math.sin(a) * d;
+      const gul = Math.pow(Math.abs(Math.sin(a * 7 + vnoise(t * 3, a, seed) * 2.5)), 6) * Math.sin(Math.PI * t);   // gullies
+      let y = moundY(d / wob, R) + lump(px, pz) * t * (1 - t) * 4 * amp - gul * 0.9 * amp;
+      if (d < er * 2.2) y += Math.max(0, 1 - Math.abs(d - er * 1.4) / er) * 0.9;   // a raised lip round the entrance
+      if (i === NR) y = 0;
       pos.push(px, Math.max(0, y) + this.T(px, pz), pz);
       const lit = (-Math.cos(a) - Math.sin(a)) * 0.5 * t;   // upper-left side catches the light
-      _c.copy(light).lerp(mid, AL.clamp(t * 1.3 - 0.1, 0, 1)).lerp(dark, AL.clamp((t - 0.6) * 2.2, 0, 1));
-      _c.multiplyScalar(0.85 + n * 0.3 + lit * 0.15);
-      if (d < er * 0.8) _c.copy(hole); else if (d < er * 2) _c.lerp(_c2.copy(hole).lerp(rim, 0.35), 1 - (d - er * 0.8) / (er * 1.2));
+      _c.copy(light).lerp(mid, AL.clamp(t * 1.3 - 0.15, 0, 1)).lerp(dark, AL.clamp((t - 0.62) * 2.4, 0, 1));
+      _c.lerp(damp, gul * 0.5);
+      _c.multiplyScalar(0.84 + n * 0.28 + lit * 0.15);
+      if (n > 0.9 && t < 0.85) _c.lerp(fresh, 0.5);   // fresh pellets
+      else if (n < 0.08) _c.multiplyScalar(0.7);
+      if (d < er * 0.8) _c.copy(hole);
+      else if (d < er * 2.2) _c.lerp(_c2.copy(hole).lerp(rim, 0.5), Math.pow(1 - (d - er * 0.8) / (er * 1.4), 1.4));
       cols.push(_c.r, _c.g, _c.b);
     }
     for (let j = 0; j < NA; j++) idx.push(0, 1 + (j + 1) % NA, 1 + j);
@@ -677,6 +707,34 @@ class R3D {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
     g.setIndex(idx); g.computeVertexNormals();
+    // loose crumbs: their own flat-shaded pieces on top (not sharing normals with the heap)
+    const ico = new THREE.IcosahedronGeometry(1, 0), ip = ico.attributes.position, nc = Math.min(320, Math.round(R * 3.2)), Rr = AL.rng(seed + 99);
+    const cp = [], cc2 = [], cn = [];
+    const tones = [col('#a07a4e'), col('#7d5c3a'), col('#c29a6a'), col('#5e4630'), col('#8a6a46')];
+    for (let k = 0; k < nc; k++) {
+      const a = Rr() * TAU, t = Math.sqrt(Rr()) * 1.05, d = er * 1.5 + t * (R - er * 1.5), x = c.x + Math.cos(a) * d, z = c.y + Math.sin(a) * d;
+      const s = (0.35 + Rr() * Rr() * 1.1) * (0.6 + 0.4 * amp), y = Math.max(0, moundY(d, R) + lump(x, z) * 0.25 * amp) + this.T(x, z) + s * 0.25;
+      const ry = Rr() * TAU, sq = 0.6 + Rr() * 0.4, cr = Math.cos(ry), sr = Math.sin(ry), tone = tones[(Rr() * tones.length) | 0], v = 0.85 + Rr() * 0.3;
+      for (let q = 0; q < ip.count; q += 3) {
+        const tri = [];
+        for (let e = 0; e < 3; e++) {
+          const lx = ip.getX(q + e) * s, ly = ip.getY(q + e) * s * sq, lz = ip.getZ(q + e) * s * (0.8 + 0.2 * sq);
+          tri.push(x + lx * cr - lz * sr, y + ly, z + lx * sr + lz * cr);
+        }
+        const ux = tri[3] - tri[0], uy = tri[4] - tri[1], uz = tri[5] - tri[2], vx = tri[6] - tri[0], vy = tri[7] - tri[1], vz = tri[8] - tri[2];
+        let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+        for (let e = 0; e < 3; e++) { cp.push(tri[e * 3], tri[e * 3 + 1], tri[e * 3 + 2]); cn.push(nx, ny, nz); cc2.push(tone.r * v, tone.g * v, tone.b * v); }
+      }
+    }
+    ico.dispose();
+    if (cp.length) {
+      const base = pos.length / 3, P = g.attributes.position.array, N = g.attributes.normal.array, C = g.attributes.color.array;
+      const P2 = new Float32Array(P.length + cp.length), N2 = new Float32Array(N.length + cn.length), C2 = new Float32Array(C.length + cc2.length);
+      P2.set(P); P2.set(cp, P.length); N2.set(N); N2.set(cn, N.length); C2.set(C); C2.set(cc2, C.length);
+      const I = idx.slice(); for (let k = 0; k < cp.length / 3; k++) I.push(base + k);
+      g.setAttribute('position', new THREE.BufferAttribute(P2, 3)); g.setAttribute('normal', new THREE.BufferAttribute(N2, 3)); g.setAttribute('color', new THREE.BufferAttribute(C2, 3));
+      g.setIndex(I);
+    }
     return g;
   }
   updateMounds(world) {
@@ -1158,7 +1216,7 @@ class R3D {
     }
     const m = 60;
     x0 = Math.max(-200, x0 - m); y0 = Math.max(-200, y0 - m); x1 = Math.min(S.W + 200, x1 + m); y1 = Math.min(S.H + 200, y1 + m);
-    this.tilt = { x0, y0, x1, y1, D, t, h0 };
+    this.tilt = { x0, y0, x1, y1, D, t, h0, fx: cam.x, fy: cam.y, vh };
     return this.tilt;
   }
   // where a screen point (NDC) meets the ground at height h (at most far away)
@@ -1206,6 +1264,8 @@ class R3D {
     if (!tilted) this.resize();   // (tilted: sized by drawTilted, before the 2D passes borrow the renderer's size)
     if (!tilted) this.tilt = null;
     if (this.ground3d) this.ground3d.visible = this.over3d.visible = tilted;
+    this.scene.fog = tilted ? this.fogObj : null;
+    if (tilted) { const D = this.tilt.D; this.fogObj.near = D * 1.5; this.fogObj.far = D * 6; }
     this.depth.visible = !tilted;
     this.governor();
     const shq = AL.R3D.shadows;   // settings: shadow quality
