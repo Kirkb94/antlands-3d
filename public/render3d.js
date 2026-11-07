@@ -105,21 +105,22 @@ function antGeos(caste, look) {
   const gas = new Builder().add(SPH, M(gx, H + 0.45, 0, gL, gR * (sh.honey ? 0.9 : 0.78), gR, 0, 0, -0.1), WHITE);
   if (lk && lk.sting) gas.seg(V(gx - gL * 0.92, H + 0.25, 0), V(gx - gL - 1.1, H + 0.05, 0), 0.14, DK);
   // legs, antennae and mandibles (leg colour): one geometry per walk frame (swing 0, +1, -1)
-  const legs = [0, 1, -1].map(swing => {
+  const legs = [0, 1, -1, 'dead'].map(swing => {
+    const dead = swing === 'dead', sv = dead ? 0 : swing;   // (the 4th frame: a dead ant's legs curled up)
     const b = new Builder(), legBase = [0.95, 1.65, 2.35], legX = [thx + 0.8, thx, thx - 0.8];
     for (let k = 0; k < 3; k++) for (const side of [-1, 1]) {
       const tri = (k === 1) === (side === 1) ? 1 : -1;
-      const ang = (legBase[k] + swing * 0.3 * tri) * side, len = (k === 2 ? 4.2 : 3.6) * sh.leg;
+      const ang = (legBase[k] + (dead ? 0.9 : sv * 0.3 * tri)) * side, len = (k === 2 ? 4.2 : 3.6) * sh.leg * (dead ? 0.55 : 1);
       const bx = legX[k], by = side * thR * 0.55;
       const kx = bx + Math.cos(ang - side * 0.35) * len * 0.45, ky = by + Math.sin(ang - side * 0.35) * len * 0.45;
       const fx = kx + Math.cos(ang + side * 0.25) * len * 0.62, fy = ky + Math.sin(ang + side * 0.25) * len * 0.62;
-      const lift = swing * tri > 0 ? 0.35 : 0;   // the swinging tripod lifts its feet
-      const hip = V(bx, H, by), knee = V(kx, H + 1.05 * sh.leg, ky), foot = V(fx, 0.08 + lift, fy);
+      const lift = !dead && sv * tri > 0 ? 0.35 : 0;   // the swinging tripod lifts its feet
+      const hip = V(bx, H, by), knee = V(kx, H + 1.05 * sh.leg, ky), foot = V(fx, dead ? H + 0.6 : 0.08 + lift, fy);
       b.seg(hip, knee, 0.24, WHITE).seg(knee, foot, 0.18, WHITE);
     }
     const aL = 2.4 * sh.ant;
     for (const s of [-1, 1]) {
-      const sw = swing * 0.08 * s, bx = hx + hR * 0.7, by = s * hR * 0.45;
+      const sw = dead ? 0.6 * s : sv * 0.08 * s, bx = hx + hR * 0.7, by = s * hR * 0.45;
       const ex = bx + Math.cos(s * 0.55 + sw) * aL * 0.55, ey = by + Math.sin(s * 0.55 + sw) * aL * 0.55;
       const tx = ex + Math.cos(s * -0.25 + sw) * aL * 0.7, ty = ey + Math.sin(s * -0.25 + sw) * aL * 0.7;
       b.seg(V(bx, H + 0.55, by), V(ex, H + 1.45, ey), 0.13, WHITE).seg(V(ex, H + 1.45, ey), V(tx, H + 1.05, ty), 0.11, WHITE);
@@ -171,7 +172,7 @@ function flush(mesh, n) {
 // one ant shape: 6 meshes (body, head, gaster, 3 leg frames) + wings
 class AntGroup {
   constructor(r3, geos) {
-    this.r3 = r3; this.cap = 64; this.n = 0; this.nl = [0, 0, 0];
+    this.r3 = r3; this.cap = 64; this.n = 0; this.nl = [0, 0, 0, 0];
     const S = r3.scene, mat = r3.antMat;
     this.body = mkInst(geos.body, mat, this.cap, S); this.head = mkInst(geos.head, mat, this.cap, S); this.gaster = mkInst(geos.gaster, mat, this.cap, S);
     this.legs = geos.legs.map(g => mkInst(g, mat, this.cap, S));
@@ -184,7 +185,7 @@ class AntGroup {
     if (this.wings) this.wings = growInst(this.wings, cap, S);
     this.cap = cap;
   }
-  begin() { this.n = 0; this.nl[0] = this.nl[1] = this.nl[2] = 0; }
+  begin() { this.n = 0; this.nl[0] = this.nl[1] = this.nl[2] = this.nl[3] = 0; }
   put(x, y, z, ca, sa, s, fr, pal) {
     if (this.n >= this.cap) this.grow();
     const i = this.n++, li = this.nl[fr]++;
@@ -196,7 +197,7 @@ class AntGroup {
   }
   end(shadow) {
     flush(this.body, this.n); flush(this.head, this.n); flush(this.gaster, this.n);
-    for (let k = 0; k < 3; k++) flush(this.legs[k], this.nl[k]);
+    for (let k = 0; k < 4; k++) flush(this.legs[k], this.nl[k]);
     if (this.wings) flush(this.wings, this.n);
     this.body.castShadow = this.head.castShadow = this.gaster.castShadow = shadow;
     for (const m of this.legs) m.castShadow = shadow;
@@ -210,8 +211,19 @@ class Pool {
     if (this.n >= this.cap) { this.cap *= 2; this.mesh = growInst(this.mesh, this.cap, this.r3.scene); }
     const i = this.n++; putM(this.mesh, i, x, y, z, Math.cos(a), Math.sin(a), sx, sy, sz); putC(this.mesh, i, c);
   }
+  // a limb: a round segment from a to b (world space)
+  seg(a, b, r, c) {
+    _sd.subVectors(b, a); const L = _sd.length();
+    if (L < 1e-4) return;
+    _sq.setFromUnitVectors(_up, _sd.multiplyScalar(1 / L));
+    _sm.compose(_smid.addVectors(a, b).multiplyScalar(0.5), _sq, _ss.set(r, L, r));
+    if (this.n >= this.cap) { this.cap *= 2; this.mesh = growInst(this.mesh, this.cap, this.r3.scene); }
+    const i = this.n++; _sm.toArray(this.mesh.instanceMatrix.array, i * 16); putC(this.mesh, i, c);
+  }
   end() { flush(this.mesh, this.n); }
 }
+const _sd = new THREE.Vector3(), _sq = new THREE.Quaternion(), _sm = new THREE.Matrix4(), _smid = new THREE.Vector3(), _ss = new THREE.Vector3();
+const _va = new THREE.Vector3(), _vb = new THREE.Vector3();
 
 // ---- colours ----------------------------------------------------------------------------------------------------
 const col = hex => new THREE.Color(hex);
@@ -240,8 +252,35 @@ const FC = {
 };
 const _c = new THREE.Color(), _c2 = new THREE.Color();
 const F3D = new Set(['fruit', 'cookie', 'ham', 'grubs', 'beetle', 'bug']);
-const F2D = new Set(['water', 'seeds', 'leaves', 'corpse', 'honeydew', 'spider']);
-const is3DFood = f => !Art.foodDrawers[f.visual] && (F3D.has(f.visual) || !F2D.has(f.visual));
+const F2D = new Set(['water', 'seeds', 'leaves', 'honeydew', 'larvae', 'nectar']);
+// carcasses drawn as 3D models even though the 2D art registered food drawers for them
+const CARC = new Set(['corpse', 'spider', 'caterpillar', 'ladybug', 'centipede', 'antlion', 'assassin', 'mantis', 'moth', 'cocoon']);
+const is3DFood = f => CARC.has(f.visual) || (!Art.foodDrawers[f.visual] && (F3D.has(f.visual) || !F2D.has(f.visual)));
+const angOf = f => f.heading != null ? f.heading + Math.PI : (f.a || 0);
+// dead ants: the colony's colours, dulled
+function deadPal(p) {
+  if (p.dead) return p.dead;
+  const g = col('#5a5048'), d = { group: p.group };
+  for (const k of ['body', 'head', 'gaster', 'leg']) d[k] = p[k].clone().lerp(g, 0.35).multiplyScalar(0.7);
+  return (p.dead = d);
+}
+// creature colours (the 2D art's)
+const CC = {
+  spider: col('#7a5a3a'), spiderCeph: col('#5a3e26'), spiderDark: col('#3a2616'), spiderLeg: col('#3a2a1c'), spiderStripe: col('#c8a878'),
+  deadBody: col('#6a6058'), deadDark: col('#3a3632'), deadLeg: col('#5a5048'), eye: col('#0c0806'),
+  beetleShell: col('#2e4448'), beetlePro: col('#1c2226'), beetleHead: col('#161a1c'), beetleLeg: col('#141210'),
+  lbRed: col('#e0321e'), lbDead: col('#a8402e'), beetleDead: col('#26343a'), lbBlack: col('#140c0a'), lbWhite: col('#f2ece0'),
+  catA: col('#6aae3c'), catB: col('#7cc04a'), catHead: col('#5a4220'), catDeadA: col('#8a9a6a'), catDeadB: col('#7a8a5c'), catDotY: col('#f2d24a'), catDotD: col('#2a3a1a'), catEye: col('#faf0dc'),
+  cenBody: col('#a2522a'), cenDark: col('#4a2210'), cenLeg: col('#c98a4a'), cenDeadBody: col('#6e5a48'), cenDeadDark: col('#3c3028'), cenDeadLeg: col('#6a5a4a'),
+  asBody: col('#5a3a26'), asRim: col('#d4502a'), asDark: col('#24160c'), asDeadBody: col('#6a5a4c'), asDeadRim: col('#8a6a52'), asDeadDark: col('#3a3028'),
+  maBody: col('#7ab648'), maDark: col('#3e6a22'), maLight: col('#9ccc6a'), maEye: col('#d8e8a0'), maDeadBody: col('#7a8462'), maDeadDark: col('#4a5038'),
+  alBody: col('#8a6a44'), alDark: col('#3e2c18'), alDeadBody: col('#7a6a58'), alDeadDark: col('#463c32'),
+  egg: col('#efe8d6'), larva: col('#3c3c44'), larvaHead: col('#2a2a2e'), larvaSpot: col('#e8892e'),
+  mothWing: col('#9a8262'), mothSpot: col('#4a3420'), mothBody: col('#5a4630'), cocoon: col('#d8c8a4'), cocoonTorn: col('#3c2814'),
+};
+const SP_LEGS = [0.55, 1.2, 1.95, 2.6];
+const LB_SPOTS = [[-1, -2.6, 1.3], [-1, 2.6, 1.3], [-4, -1.6, 1.1], [-4, 1.6, 1.1], [1.6, -1.7, 0.9], [1.6, 1.7, 0.9], [-5.6, 0, 0.8]];
+const SKIP_OVER = new Set(['world-fx', 'eco-hunters-art']);   // their 'overAnts' 2D creatures are drawn in 3D here
 
 // mound profile: a low dome with a shallow crater at the entrance (also lifts ants walking over it)
 function moundY(d, R) {
@@ -288,6 +327,14 @@ class R3D {
     this.blobs = new Pool(this, new THREE.SphereGeometry(1, 12, 9), this.blobMat);
     this.chunks = new Pool(this, new THREE.IcosahedronGeometry(1, 0), this.chunkMat);
     this.carried = new Pool(this, new THREE.SphereGeometry(1, 8, 6), this.blobMat);
+    // creatures: glossy shells (beetles, ladybugs, eyes), soft bodies, limbs, wings
+    this.shellMat = new THREE.MeshStandardMaterial({ roughness: 0.2, metalness: 0.12 });
+    this.bugMat = new THREE.MeshStandardMaterial({ roughness: 0.55, metalness: 0.02 });
+    this.cShell = new Pool(this, new THREE.SphereGeometry(1, 16, 12), this.shellMat);
+    this.cSoft = new Pool(this, new THREE.SphereGeometry(1, 12, 9), this.bugMat);
+    this.cLimb = new Pool(this, new THREE.CylinderGeometry(1, 1, 1, 7, 1, true), this.bugMat);
+    this.cWing = new Pool(this, new THREE.SphereGeometry(1, 14, 6), this.wingMat, false);
+    this._c = { x: 0, y: 0, a: 0, ca: 1, sa: 0, s: 1, h0: 0 };
     this.mounds = new Map(); this.world = null; this.statics = []; this.flowerKey = -1; this.flowerMesh = null;
     this.ok = true;
   }
@@ -447,8 +494,8 @@ class R3D {
   }
 
   // ---- food that stands up off the ground -----------------------------------------------------------------
-  updateFoods(S, v) {
-    const B = this.blobs, Ch = this.chunks;
+  updateFoods(world, v) {
+    const S = world.surface, B = this.blobs, Ch = this.chunks;
     B.begin(); Ch.begin();
     for (const f of S.foods) {
       if (f.gone || (f.spring && f.amount < 1)) continue;
@@ -489,10 +536,24 @@ class R3D {
           }
           break;
         }
-        case 'beetle': {
-          const r = f.r, a = f.heading != null ? f.heading + Math.PI : (f.a || 0), ca = Math.cos(a), sa = Math.sin(a);
-          B.put(f.x - ca * r * 0.15, r * 0.42, f.y - sa * r * 0.15, a, r * 0.85 * (0.7 + 0.3 * frac), r * 0.48, r * 0.62, FC.beetle);
-          B.put(f.x + ca * r * 0.75, r * 0.3, f.y + sa * r * 0.75, a, r * 0.32, r * 0.28, r * 0.36, FC.beetleHead);
+        case 'beetle': this.frame(f.x, f.y, angOf(f), f.r * 0.85 * (0.7 + 0.3 * frac) / 10.5); this.beetle(0, true); break;
+        case 'spider': this.frame(f.x, f.y, angOf(f), 0.75 + 0.25 * frac); this.spider(0, true); break;
+        case 'caterpillar': this.frame(f.x, f.y, angOf(f), 0.7 + 0.3 * frac); this.caterpillar(0, false, true); break;
+        case 'ladybug': this.frame(f.x, f.y, f.a || 0, 0.9); this.ladybug(0, true); break;
+        case 'centipede': this.frame(f.x, f.y, angOf(f), 0.7 + 0.3 * frac); this.centipede(0, true); break;
+        case 'assassin': this.frame(f.x, f.y, angOf(f), 0.7 + 0.3 * frac); this.assassin(0, true, true, false); break;
+        case 'mantis': this.frame(f.x, f.y, angOf(f), 0.7 + 0.3 * frac); this.mantis(0, true, true, false, false); break;
+        case 'antlion': this.frame(f.x, f.y, angOf(f), 0.7 + 0.3 * frac); this.antlion(true); break;
+        case 'moth': this.frame(f.x, f.y, angOf(f), 0.6 + 0.4 * frac); this.moth(); break;
+        case 'cocoon': this.frame(f.x, f.y, f.a || 0, 0.7 + 0.3 * frac); this.cocoon(true); break;
+        case 'corpse': {
+          const cc = world.colonies[f.col || 0];
+          if (!cc) break;
+          const p = deadPal(palOf(this, cc.colours || cc.sp, C.WORKER)), R = AL.rng(f.id * 3 + 1), n = Math.min(6, f.n || 1), s = (cc.sp.size || 1);
+          for (let k = 0; k < n; k++) {
+            const x = f.x + (k ? (R() - 0.5) * 10 : 0), y = f.y + (k ? (R() - 0.5) * 10 : 0), a = R() * TAU;
+            p.group.put(x, -0.75 * s + this.heightAt(x, y), y, Math.cos(a), Math.sin(a), s, 3, p);
+          }
           break;
         }
         case 'bug': B.put(f.x, 1.5, f.y, f.a || 0, 4.5, 1.7, 2.6, FC.bug); break;
@@ -515,10 +576,8 @@ class R3D {
     const fog = world.fog, HOST = A.host, CAPT = C.CAPTIVE, ME = world.me || 0, HP = A.hp, MHP = A.maxhp, CS = AL.CASTES, SZ = A.size;
     const cols = world.colonies, x0 = v.x0 - 12, x1 = v.x1 + 12, y0 = v.y0 - 12, y1 = v.y1 + 12;
     const FR = [0, 1, 0, 2], CP = this.carried, hasMounds = this.moundList.length > 0;
-    for (const g of this.groups.values()) g.begin();
-    CP.begin();
     let drawn = 0;
-    for (let i = 0; i < n; i++) {
+    for (let i = 0; i < n; i++) {   // (groups and the carried pool are begun / ended in render())
       if (!ST[i] || LY[i] !== 0) continue;
       const x = PX[i] + (X[i] - PX[i]) * alpha, y = PY[i] + (Y[i] - PY[i]) * alpha;
       if (x < x0 || x > x1 || y < y0 || y > y1) continue;
@@ -542,10 +601,204 @@ class R3D {
       if (HP[i] < MHP[i]) r.barAnt(i, x * z + ox, y * z + oy, z < 0.8 ? Math.max(1.5, 2.6 * z) : 6.5 * z * (SZ ? SZ[i] : 1) * CS[caste].size);
       drawn++;
     }
-    const shadow = z >= 1.1;
-    for (const g of this.groups.values()) g.end(shadow);
-    CP.end(); CP.mesh.castShadow = shadow;
     r.stats.drawn = drawn;
+  }
+
+  // ---- creatures: models built from primitives each frame, in the 2D art's local units -------------------------
+  // frame() sets the creature's place; local (lx forward, ly to its side, h up) -> world
+  frame(x, y, a, s) { const c = this._c; c.x = x; c.y = y; c.a = a; c.ca = Math.cos(a); c.sa = Math.sin(a); c.s = s; c.h0 = this.heightAt(x, y); }
+  lw(out, lx, ly, h) { const c = this._c; return out.set(c.x + (lx * c.ca - ly * c.sa) * c.s, c.h0 + h * c.s, c.y + (lx * c.sa + ly * c.ca) * c.s); }
+  blob(lx, ly, h, rx, ry, rz, rot, colr, shell) { const c = this._c, p = this.lw(_va, lx, ly, h); (shell ? this.cShell : this.cSoft).put(p.x, p.y, p.z, c.a + (rot || 0), rx * c.s, ry * c.s, rz * c.s, colr); }
+  wing(lx, ly, h, rx, rz, rot) { const c = this._c, p = this.lw(_va, lx, ly, h); this.cWing.put(p.x, p.y, p.z, c.a + (rot || 0), rx * c.s, 0.05 * c.s, rz * c.s, WHITE); }
+  limb(x1, y1, h1, x2, y2, h2, r, colr) {
+    const s = this._c.s, a = this.lw(_va, x1, y1, h1), b = this.lw(_vb, x2, y2, h2);
+    this.cLimb.seg(a, b, r * s, colr); this.cSoft.put(b.x, b.y, b.z, 0, r * s, r * s, r * s, colr);
+  }
+  cBegin() { this.cShell.begin(); this.cSoft.begin(); this.cLimb.begin(); this.cWing.begin(); }
+  cEnd() { this.cShell.end(); this.cSoft.end(); this.cLimb.end(); this.cWing.end(); }
+  spider(t, dead, lunge) {
+    const body = dead ? CC.deadBody : CC.spider, ceph = dead ? CC.deadBody : CC.spiderCeph, dark = dead ? CC.deadDark : CC.spiderDark, leg = dead ? CC.deadLeg : CC.spiderLeg;
+    const up = lunge ? 1.2 : 0;
+    for (let k = 0; k < 4; k++) for (const side of [-1, 1]) {
+      const ph = ((k + (side > 0 ? 1 : 0)) & 1) ? Math.PI : 0, sw = dead ? 0 : Math.sin(t * 9 + ph) * 0.22, lift = dead ? 0 : Math.max(0, Math.sin(t * 9 + ph)) * 1.4;
+      const bx = 3.2 - k * 1.5, by = side * 1.9, ka = (SP_LEGS[k] + sw) * side, L1 = dead ? 5 : 9, L2 = dead ? 4 : 10.5;
+      const kx = bx + Math.cos(ka) * L1, ky = by + Math.sin(ka) * L1, fa = ka + side * (dead ? 1.6 : (k < 2 ? -0.45 : 0.45));
+      const fx = kx + Math.cos(fa) * L2, fy = ky + Math.sin(fa) * L2, kh = dead ? 5 : 8 + up;
+      this.limb(bx, by, 3.8 + up, kx, ky, kh, 0.8, leg); this.limb(kx, ky, kh, fx, fy, dead ? 4 : 0.3 + lift, 0.55, leg);
+    }
+    this.blob(-7, 0, 4.6 + up * 0.5, 7.6, 4.4, 5.8, 0, body);
+    if (!dead) { this.blob(-6.5, 0, 8.6 + up * 0.5, 4.8, 0.5, 0.9, 0, CC.spiderStripe); for (let k = 0; k < 4; k++) this.blob(-3.5 - k * 2.2, 0, 8.2 + up * 0.5 - k * 0.5, 0.8, 0.5, 3.4 - k * 0.5, 0, dark); }
+    this.blob(2.2, 0, 4 + up, 4.8, 2.8, 3.9, 0, ceph);
+    if (!dead) for (const s2 of [-1, 1]) { this.blob(5.4, s2 * 1.15, 6 + up, 0.95, 0.9, 0.95, 0, CC.eye, true); this.blob(4.6, s2 * 0.6, 6.4 + up, 0.5, 0.5, 0.5, 0, CC.eye, true); }
+    for (const s2 of [-1, 1]) this.limb(6.2, s2 * 1.2, 4 + up, 8.6, s2 * 1.9, 2.4 + up, 0.55, dark);
+  }
+  beetle(t, dead) {
+    const leg = dead ? CC.deadLeg : CC.beetleLeg;
+    for (let k = -1; k <= 1; k++) for (const sd of [-1, 1]) {
+      const ph = ((k + 1 + (sd > 0 ? 1 : 0)) & 1) ? Math.PI : 0, sw = dead ? 0 : Math.sin(t * 8 + ph) * 0.3, lift = dead ? 0 : Math.max(0, Math.sin(t * 8 + ph)) * 1.2;
+      const bx = k * 3.6 + 1, by = sd * 4.5, ang = sd * (Math.PI / 2 + k * -0.5 + sw) + (dead ? -sd * 0.9 : 0);
+      const kx = bx + Math.cos(ang) * (dead ? 4 : 6), ky = by + Math.sin(ang) * (dead ? 4 : 6), fa = ang - sd * k * 0.4 + sd * (dead ? 1.4 : 0.2);
+      const fx = kx + Math.cos(fa) * (dead ? 3.5 : 5), fy = ky + Math.sin(fa) * (dead ? 3.5 : 5);
+      this.limb(bx, by, 3, kx, ky, dead ? 5 : 5.5, 0.75, leg); this.limb(kx, ky, dead ? 5 : 5.5, fx, fy, dead ? 5.5 : 0.3 + lift, 0.55, leg);
+    }
+    for (const sd of [-1, 1]) { const w = dead ? 0.4 : Math.sin(t * 3 + sd) * 0.15; this.limb(11, sd * 1.6, 4, 15, sd * (3 + w * 10), 5.2, 0.35, leg); this.limb(15, sd * (3 + w * 10), 5.2, 18, sd * (5.5 + w * 8), 4.6, 0.3, leg); }
+    this.blob(-2.5, 0, 4.4, 10.5, 4.6, 7.4, 0, dead ? CC.beetleDead : CC.beetleShell, true);
+    this.blob(6.6, 0, 4, 3.6, 3, 5, 0, dead ? CC.deadDark : CC.beetlePro, true);
+    this.blob(10, 0, 3.4, 2.6, 2.1, 2.8, 0, dead ? CC.deadDark : CC.beetleHead, true);
+    for (const sd of [-1, 1]) this.limb(12, sd * 1, 3.2, 13.6, sd * 0.2, 2.8, 0.45, CC.eye);
+  }
+  ladybug(t, dead) {
+    if (!dead) for (let k = -1; k <= 1; k++) for (const sd of [-1, 1]) { const sw = Math.sin(t * 10 + k + sd) * 0.3; this.limb(k * 2, sd * 3, 1.8, k * 2.6 + sw, sd * 5.4, 0.2, 0.4, CC.lbBlack); }
+    this.blob(-1.5, 0, 2.6, 5.8, 3.6, 5, 0, dead ? CC.lbDead : CC.lbRed, true);
+    for (const sp of LB_SPOTS) {
+      const u = (sp[0] + 1.5) / 5.8, w = sp[1] / 5, h = 2.6 + 3.6 * Math.sqrt(Math.max(0, 1 - u * u - w * w));
+      this.blob(sp[0], sp[1], h - 0.1, sp[2], 0.35, sp[2], 0, CC.lbBlack, true);
+    }
+    this.blob(4.6, 0, 2.2, 1.9, 1.7, 3.6, 0, CC.lbBlack, true);
+    for (const sd of [-1, 1]) this.blob(4.8, sd * 2.2, 3.4, 0.8, 0.5, 0.9, 0, CC.lbWhite);
+    this.blob(6.4, 0, 1.9, 1.2, 1, 1.7, 0, CC.lbBlack, true);
+  }
+  caterpillar(t, thrash, dead) {
+    const N = 10, gap = 3.1, amp = thrash ? 3.2 : 1.1;
+    for (let k = N - 1; k >= 0; k--) {
+      const lx = -k * gap, ly = dead ? Math.sin(k * 0.6) * 1.5 : Math.sin(t * (thrash ? 8 : 2.2) - k * 0.75) * amp * (0.4 + k / N);
+      const r = k === 0 ? 3.7 : 3.4 - (k > 6 ? (k - 6) * 0.3 : 0), hump = dead ? 0 : Math.max(0, Math.sin(t * 2.2 - k * 0.75)) * 0.8;
+      if (k === 0) {
+        this.blob(lx, ly, r * 0.85, r, r * 0.85, r, 0, dead ? CC.deadDark : CC.catHead);
+        for (const sd of [-1, 1]) this.blob(lx + r * 0.55, ly + sd * r * 0.45, r * 1.2, 0.6, 0.5, 0.6, 0, CC.catEye);
+        continue;
+      }
+      this.blob(lx, ly, r * 0.85 + hump, r, r * 0.88, r, 0, dead ? (k & 1 ? CC.catDeadA : CC.catDeadB) : (k & 1 ? CC.catA : CC.catB));
+      if (!dead) this.blob(lx, ly, r * 1.68 + hump, 0.9, 0.35, 0.9, 0, k % 2 ? CC.catDotY : CC.catDotD);
+    }
+  }
+  centipede(t, dead) {
+    const CN = 15, body = dead ? CC.cenDeadBody : CC.cenBody, dark = dead ? CC.cenDeadDark : CC.cenDark, leg = dead ? CC.cenDeadLeg : CC.cenLeg, P = [];
+    for (let k = 0; k < CN; k++) P.push([9 - k * 1.85, dead ? Math.sin(k * 0.7) * 1.2 : Math.sin(t * 6 - k * 0.55) * 1.6 * (k / CN + 0.3)]);
+    for (let k = 1; k < CN; k++) for (const sd of [-1, 1]) {
+      const [sx, sy] = P[k], sw = dead ? 0.6 : Math.sin(t * 14 + k * 0.9 + (sd > 0 ? Math.PI : 0)) * 0.5;
+      this.limb(sx, sy + sd * 1.1, 1.3, sx - 0.5 + sw * 0.5, sy + sd * 3, 1.4, 0.26, leg); this.limb(sx - 0.5 + sw * 0.5, sy + sd * 3, 1.4, sx - 1 + sw, sy + sd * 4.2, dead ? 1 : 0.15, 0.22, leg);
+    }
+    const [tx, ty] = P[CN - 1];
+    for (const sd of [-1, 1]) this.limb(tx, ty, 1.3, tx - 4, ty + sd * 2.4, 1, 0.22, leg);
+    for (let k = CN - 1; k >= 0; k--) { const [sx, sy] = P[k], w = k === 0 ? 1.9 : 1.6 - k * 0.02; this.blob(sx, sy, 1.4, 1.2, 1, w, 0, k === 0 ? dark : body, true); }
+    const [hx, hy] = P[0];
+    for (const sd of [-1, 1]) {
+      const wv = dead ? 0 : Math.sin(t * 4 + sd) * 0.4;
+      this.limb(hx + 1, hy + sd * 0.8, 1.8, hx + 5, hy + sd * (2.5 + wv), 2.8, 0.24, dark); this.limb(hx + 5, hy + sd * (2.5 + wv), 2.8, hx + 8.5, hy + sd * (4 + wv), 2.2, 0.2, dark);
+      this.limb(hx + 0.8, hy + sd * 1.1, 1.3, hx + 2.8, hy + sd * 1.8, 1.2, 0.35, dark); this.limb(hx + 2.8, hy + sd * 1.8, 1.2, hx + 3, hy + sd * 0.4, 1, 0.3, dark);
+    }
+  }
+  assassin(t, dead, still, stab) {
+    const body = dead ? CC.asDeadBody : CC.asBody, rim = dead ? CC.asDeadRim : CC.asRim, dark = dead ? CC.asDeadDark : CC.asDark;
+    for (let k = 0; k < 3; k++) for (const sd of [-1, 1]) {
+      const sw = dead || still ? 0 : Math.sin(t * 7 + k * 2 + (sd > 0 ? Math.PI : 0)) * 0.25;
+      const bx = 2 - k * 2.2, ang = sd * (Math.PI / 2 + (k - 1) * -0.7 + sw), L1 = dead ? 3.5 : 5.5, L2 = dead ? 3.5 : 6;
+      const kx = bx + Math.cos(ang) * L1, ky = sd * 1.5 + Math.sin(ang) * L1, fx = kx + Math.cos(ang - sd * 0.5 * (k - 1)) * L2, fy = ky + Math.sin(ang - sd * 0.5 * (k - 1)) * L2;
+      this.limb(bx, sd * 1.5, 3, kx, ky, dead ? 4 : 5.5, 0.4, dark); this.limb(kx, ky, dead ? 4 : 5.5, fx, fy, dead ? 4.5 : 0.2, 0.32, dark);
+    }
+    this.blob(-3, 0, 2.8, 5.4, 1.5, 3.3, 0, rim);
+    this.blob(-3, 0, 3.4, 4.9, 1.5, 2.5, 0, body, true);
+    this.blob(2.6, 0, 3.4, 2.4, 1.7, 2, 0, body, true);
+    this.blob(5.6, 0, 3.8, 1.6, 0.9, 0.9, 0, dark, true);
+    for (const sd of [-1, 1]) { this.limb(6.6, sd * 0.4, 4.2, 9, sd * 2.2, 5.6, 0.22, dark); this.limb(9, sd * 2.2, 5.6, 11.5, sd * 3.6, 5.2, 0.18, dark); }
+    if (stab) this.limb(6.8, 0, 3.6, 10, 0, 2.6, 0.28, CC.eye); else this.limb(6.6, 0.3, 3.4, 5.4, 1.3, 2.4, 0.28, CC.eye);
+  }
+  mantis(t, dead, still, strike, wings) {
+    const body = dead ? CC.maDeadBody : CC.maBody, dark = dead ? CC.maDeadDark : CC.maDark, light = dead ? CC.maDeadBody : CC.maLight;
+    for (const [bx, sw0] of [[-1, 0], [-3, 1]]) for (const sd of [-1, 1]) {
+      const sw = dead || still ? 0 : Math.sin(t * 6 + sw0 * 2 + (sd > 0 ? Math.PI : 0)) * 0.2, ang = sd * (Math.PI / 2 + 0.5 + sw0 * 0.4 + sw);
+      const kx = bx + Math.cos(ang) * 6, ky = sd * 0.8 + Math.sin(ang) * 6, fx = kx + Math.cos(ang + sd * 0.5) * 6, fy = ky + Math.sin(ang + sd * 0.5) * 6;
+      this.limb(bx, sd * 0.8, 4.4, kx, ky, dead ? 4 : 7.5, 0.4, dark); this.limb(kx, ky, dead ? 4 : 7.5, fx, fy, dead ? 3 : 0.2, 0.32, dark);
+    }
+    this.blob(-7.5, 0, 4.6, 6.6, 2, 2.4, 0, light);
+    if (wings) for (const sd of [-1, 1]) this.wing(-5, sd * 5, 6.2, 8, 3.6, sd * 0.35);
+    this.limb(-1.5, 0, 4.6, 6.6, 0, dead ? 5 : 8.4, 1.05, body);
+    const reach = !dead && strike ? 7 + Math.abs(Math.sin(t * 12)) * 2 : 2.5;
+    for (const sd of [-1, 1]) {
+      const kx = 5 + reach * 0.6, ky = sd * (strike ? 2.8 : 2), fx = kx + (strike ? reach : 1.5), fy = sd * (strike ? 1.2 : 0.5);
+      this.limb(6.2, sd * 0.6, 7.8, kx, ky, strike ? 8.8 : 9.6, 0.55, body); this.limb(kx, ky, strike ? 8.8 : 9.6, fx, fy, strike ? 6 : 7.2, 0.45, body);
+    }
+    this.blob(8.8, 0, dead ? 5.2 : 8.8, 1.8, 1.2, 2, 0, body);
+    if (!dead) for (const sd of [-1, 1]) this.blob(8.3, sd * 1.8, 9.2, 0.85, 0.85, 0.85, 0, CC.maEye, true);
+    for (const sd of [-1, 1]) { this.limb(10, sd * 0.4, dead ? 5.4 : 9.2, 13, sd * 2.5, dead ? 5 : 11, 0.18, dark); this.limb(13, sd * 2.5, dead ? 5 : 11, 15.5, sd * 4.5, dead ? 4.6 : 11.4, 0.15, dark); }
+  }
+  antlion(dead) {
+    const body = dead ? CC.alDeadBody : CC.alBody, dark = dead ? CC.alDeadDark : CC.alDark;
+    this.blob(-1.2, 0, 2.6, 4.4, 2.8, 3.6, 0, body);
+    this.blob(3.2, 0, 1.8, 1.8, 1.3, 1.6, 0, dark);
+    for (const sd of [-1, 1]) { this.limb(4.4, sd * 0.6, 1.8, 6.5, sd * 1.6, 1.8, 0.38, dark); this.limb(6.5, sd * 1.6, 1.8, 8.4, sd * 0.4, 1.6, 0.32, dark); }
+  }
+  moth() {
+    for (const sd of [-1, 1]) { this.blob(-2.5, sd * 6.5, 1.1, 6.5, 0.3, 6, sd * 0.35, CC.mothWing); this.blob(-3, sd * 6, 1.5, 2, 0.2, 1.4, 0, CC.mothSpot); }
+    this.blob(-1, 0, 1.6, 6, 1.5, 1.8, 0, CC.mothBody);
+    for (const sd of [-1, 1]) this.limb(4, sd * 0.6, 1.8, 8, sd * 3, 2.6, 0.25, CC.mothBody);
+  }
+  cocoon(torn) {
+    this.blob(0, 0, 3.6, 9, 4, 4.8, 0, CC.cocoon);
+    if (torn) this.blob(3, 0, 6.6, 3.5, 1, 2.2, 0, CC.cocoonTorn);
+  }
+  eggsac() { this.blob(0, 0, 4, 4.6, 4.2, 4.6, 0, CC.egg); }
+  lblarva(t) {
+    const wig = Math.sin(t * 0.8) * 0.12;
+    for (const sd of [-1, 1]) for (let j = 0; j < 3; j++) this.limb(2.2 - j * 0.9, sd * 0.9, 1, 2.6 - j * 1.1, sd * 2.1, 0.1, 0.18, CC.larvaHead);
+    for (let k = 0; k < 5; k++) { const sw = 1.6 - Math.abs(k - 1.5) * 0.25; this.blob(2.6 - k * 1.5, Math.sin(k + wig * 8) * 0.25, 1.1, 1, 0.9, sw, 0, k === 0 ? CC.larvaHead : CC.larva); }
+    for (const sd of [-1, 1]) this.blob(0.9, sd * 0.8, 1.9, 0.45, 0.25, 0.45, 0, CC.larvaSpot);
+  }
+  // the live creatures (2D: world-fx.js and eco-hunters-art.js 'overAnts', skipped in 3D)
+  updateCreatures(world, v) {
+    const L = world.surface.creatures || [], a = v.alpha || 0, fog = world.fog, t = performance.now() / 1000;
+    const big = Math.min(2.2, Math.max(1, 1.15 / (v.z / (v.dpr || 1))));
+    for (const cr of L) {
+      if (!cr.alive || cr.hidden) continue;
+      if (cr.flying && cr.type !== 'mantis') continue;   // flying ladybugs and butterflies stay in the 2D weather layer
+      const x = cr.px != null ? cr.px + (cr.x - cr.px) * a : cr.x, y = cr.py != null ? cr.py + (cr.y - cr.py) * a : cr.y;
+      if (x < v.x0 - 40 || x > v.x1 + 40 || y < v.y0 - 40 || y > v.y1 + 40) continue;
+      if (fog && !fog.seenAt(x, y)) continue;
+      const k = big * (cr.scale || 1), an = cr.anim || 0;
+      switch (cr.type) {
+        case 'spider': this.frame(x, y, cr.a, k); this.spider(an * 0.35, false, cr.state === 'stalk' || cr.state === 'hunt'); break;
+        case 'beetle': this.frame(x, y, cr.a, big * 0.95); this.beetle(an * 0.5, false); break;
+        case 'ladybug': this.frame(x, y, cr.a, Math.max(1, big * 0.9)); this.ladybug(t, false); break;
+        case 'caterpillar': this.frame(x, y, cr.a, big * 0.95); this.caterpillar(an, cr.state === 'thrash', false); break;
+        case 'lblarva': this.frame(x, y, cr.a, big); this.lblarva(an); break;
+        case 'eggsac': this.frame(x, y, 0, 1); this.eggsac(); break;
+        case 'centipede': this.frame(x, y, cr.a, k); this.centipede(an * 0.3, false); break;
+        case 'assassin': this.frame(x, y, cr.a, k * 1.05); this.assassin(an * 0.4, false, cr.state === 'wait', cr.state === 'bite' || cr.state === 'feed'); break;
+        case 'mantis': this.frame(x, y, cr.a, k * (cr.flying ? 1.1 : 1)); if (cr.flying) this._c.h0 += 14; this.mantis(t, false, cr.state === 'perch', cr.state === 'bite', !!cr.flying); break;
+      }
+    }
+  }
+
+  // F8: a gallery of every 3D model, laid out beside your mound (1 creatures, 2 carcasses, 3 ants), slowly turning
+  gallery(world) {
+    const pg = AL.R3D.gallery, r = this.r, p = world.player, t = performance.now() / 1000, spin = t * 0.5;
+    const cx = p.x + 200, cy = p.y - 10, L = this.labels = [];
+    r.cam.x = cx; r.cam.y = cy; r.cam.z = pg === 2 ? 4.4 : 2.9;
+    const at = (i, cols, dx, dy, rows) => [cx + (i % cols - (cols - 1) / 2) * dx, cy + (((i / cols) | 0) - (rows - 1) / 2) * dy - 8];
+    if (pg < 2) {
+      const live = [
+        ['Wolf spider', () => this.spider(t * 3, false, false)], ['Ground beetle', () => this.beetle(t * 2, false)], ['Ladybug', () => this.ladybug(t, false)],
+        ['Caterpillar', () => this.caterpillar(t * 3, false, false)], ['Centipede', () => this.centipede(t * 2, false)], ['Assassin bug', () => this.assassin(t * 2, false, false, false)],
+        ['Praying mantis', () => this.mantis(t, false, false, false, false)], ['Mantis, striking', () => this.mantis(t, false, false, true, false)], ['Ladybug larva', () => this.lblarva(t * 5)], ['Spider egg sac', () => this.eggsac()],
+      ];
+      const dead = [
+        ['Dead spider', () => this.spider(0, true)], ['Dead beetle', () => this.beetle(0, true)], ['Dead caterpillar', () => this.caterpillar(0, false, true)], ['Dead ladybug', () => this.ladybug(0, true)], ['Dead centipede', () => this.centipede(0, true)],
+        ['Dead assassin bug', () => this.assassin(0, true, true, false)], ['Dead mantis', () => this.mantis(0, true, true, false, false)], ['Dead antlion', () => this.antlion(true)], ['Dead moth', () => this.moth()], ['Torn cocoon', () => this.cocoon(true)],
+      ];
+      (pg === 0 ? live : dead).forEach(([name, fn], i) => { const [x, y] = at(i, 5, 52, 84, 2); this.frame(x, y, spin + i, 1.1); fn(); L.push({ x, y: y + 30, text: name }); });
+      return;
+    }
+    const cc = world.colonies[world.me || 0], rv = world.colonies.find(c => c && c !== cc) || cc;
+    const show = [[cc, 0], [cc, 1], [cc, 2], [cc, 3], [cc, 4], [cc, 5], [cc, 6], [cc, 7], [cc, 8], [cc, 9], [rv, 0], [rv, 3], [rv, 4], [rv, 7], [cc, -1]];
+    const FR = [0, 1, 0, 2];
+    show.forEach(([c, k], i) => {
+      const [x, y] = at(i, 5, 34, 44, 3), dead = k < 0, ca = dead ? 0 : k, pal = palOf(this, c.colours || c.sp, ca);
+      const s = AL.CASTES[ca].size * (c.sp.size || 1), a = spin + i;
+      pal.group.put(x, dead ? -0.75 * s : 0, y, Math.cos(a), Math.sin(a), s, dead ? 3 : FR[((t * 8) | 0) & 3], dead ? deadPal(pal) : pal);
+      L.push({ x, y: y + 17, text: dead ? 'Dead ant' : (c === rv ? 'Rival ' : '') + AL.CASTES[ca].name });
+    });
+    if (rv === cc) L.length = 10;
   }
 
   render(cam, view, alpha) {
@@ -566,8 +819,16 @@ class R3D {
     sun.shadow.radius = view.z > 2 ? 3 : 1.5;
     this.updateFlowers(S);
     this.updateMounds(world);
-    this.updateFoods(S, view);
+    for (const g of this.groups.values()) g.begin();
+    this.carried.begin(); this.cBegin();
     this.updateAnts(world, alpha, view, view.z, view.ox, view.oy);
+    this.updateFoods(world, view);
+    this.updateCreatures(world, view);
+    this.labels = null;
+    if (AL.R3D.gallery != null) this.gallery(world);
+    const shadow = view.z >= 1.1;
+    for (const g of this.groups.values()) g.end(shadow);
+    this.carried.end(); this.carried.mesh.castShadow = shadow; this.cEnd();
     this.gl.render(this.scene, c3);
   }
 }
@@ -601,6 +862,17 @@ P.drawFoods2D = function (ctx, v) {
       case 'corpse': this.drawCorpse(ctx, f); break;
       case 'spider': if (this.drawSpiderBody) this.drawSpiderBody(ctx, f, true); break;
     }
+  }
+};
+// a render layer without some systems (whose drawing the 3D scene has taken over)
+P.layerSkip = function (name, ctx, view, skip) {
+  const sys = this.world.systems;
+  for (let k = 0; k < sys.length; k++) {
+    const r = sys[k].render; if (!r || !r[name] || skip.has(sys[k].id)) continue;
+    ctx.save();
+    try { r[name](ctx, view, this); } catch (e) { if (!this._warned) { console.error('[render ' + sys[k].id + '.' + name + ']', e); this._warned = true; } }
+    ctx.restore();
+    ctx.setTransform(view.z, 0, 0, view.z, view.ox, view.oy);
   }
 };
 // siege bars over mounds (the 2D mound drew these; the 3D mound can't)
@@ -653,8 +925,12 @@ P.drawSurface = function (ctx, cam, alpha, opacity) {
   // 4. everything over the ants (2D)
   ctx.setTransform(z, 0, 0, z, ox, oy);
   this.drawParticles(ctx, z);
-  this.layer('overAnts', ctx, view);
+  this.layerSkip('overAnts', ctx, view, SKIP_OVER);
   this.drawSieges(ctx);
+  if (r3.labels) {   // F8 gallery names
+    ctx.font = '600 ' + (11 / z * this.dpr).toFixed(2) + 'px system-ui,sans-serif'; ctx.textAlign = 'center';
+    for (const l of r3.labels) { ctx.fillStyle = 'rgba(15,10,5,0.7)'; ctx.fillText(l.text, l.x + 0.4 / z, l.y + 0.4 / z); ctx.fillStyle = '#f6ecd6'; ctx.fillText(l.text, l.x, l.y); }
+  }
   this.drawTreeShade(ctx, 1);
   this.layer('weather', ctx, view);
   this.layer('grade', ctx, view);
@@ -669,8 +945,15 @@ P.drawSurface = function (ctx, cam, alpha, opacity) {
   ctx.globalAlpha = 1;
 };
 
-AL.R3D = { enabled: true, THREE };
+AL.R3D = { enabled: true, THREE, gallery: null };
 window.addEventListener('keydown', e => {
+  if (e.key === 'F8' || e.key === '\\' || e.code === 'Backslash') {   // 3D model gallery: creatures -> carcasses -> ants -> off
+    e.preventDefault();
+    const g = AL.R3D.gallery;
+    AL.R3D.gallery = g == null ? 0 : g < 2 ? g + 1 : null;
+    if (AL.UI && AL.UI.toast) AL.UI.toast(AL.R3D.gallery == null ? '3D gallery off [F8]' : '3D gallery: ' + ['creatures', 'carcasses', 'ants'][AL.R3D.gallery] + ' [F8]');
+    return;
+  }
   if (e.key !== 'F7') return;
   e.preventDefault();
   AL.R3D.enabled = !AL.R3D.enabled;
