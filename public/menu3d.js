@@ -181,6 +181,52 @@ const Port = {
   },
 };
 
+// ---- Cosmetics tab: your colony's hat (hats.js), each card a turning soldier of your species wearing it ------------
+const Cos = {
+  models: new Map(), key: null,
+  model(id) {
+    const sk = UI.species || 'fire';
+    if (this.key !== sk) { this.models.clear(); this.key = sk; }
+    let g = this.models.get(id);
+    if (g) return g;
+    const { cols } = specCols(sk), ant = R3.antModel(cols, C.SOLDIER);
+    g = new THREE.Group(); g.add(ant); g.userData.ant = ant;
+    const hm = id !== 'none' && R3.hats ? R3.hats.mesh(id, 0) : null;
+    if (hm) { const hd = AL.Hats.head(C.SOLDIER, cols.look, R3.LOOKS); hm.position.set(hd.x, 1.75 + hd.r * 0.62, 0); hm.scale.setScalar(hd.r * 1.4); g.add(hm); g.userData.hat = hm; }
+    this.models.set(id, g);
+    return g;
+  },
+  build() {
+    const el = $('hatGrid'); if (!el || el.dataset.built) return;
+    el.dataset.built = '1';
+    const cards = [{ id: 'none', name: 'No hat' }].concat(AL.Hats ? AL.Hats.LIST : []);
+    el.innerHTML = cards.map(h => '<button type="button" class="hatc" data-hat="' + h.id + '"><canvas width="120" height="104"></canvas><span>' + h.name + '</span></button>').join('');
+    el.onclick = e => { const b = e.target.closest('.hatc'); if (!b || !AL.Hats) return; AL.Hats.save(b.dataset.hat); this.sync(); };
+    this.sync();
+  },
+  sync() {
+    const cur = AL.Hats ? AL.Hats.saved() : 'none';
+    for (const b of document.querySelectorAll('#hatGrid .hatc')) b.classList.toggle('on', b.dataset.hat === cur);
+    const n = $('hatNow'); if (n) n.textContent = AL.Hats ? AL.Hats.nameOf(cur) : '';
+  },
+  tick(t) {
+    if (!$('tCos') || $('tCos').hidden || !Port.r) return;
+    this.build();
+    let i = 0;
+    for (const b of document.querySelectorAll('#hatGrid .hatc')) {
+      const cv = b.querySelector('canvas'), g = this.model(b.dataset.hat), on = b.classList.contains('on');
+      g.rotation.y = t * (on ? 0.9 : 0.35) + i * 0.7; g.userData.ant.userData.frame(on ? FR[((t * 9) | 0) & 3] : 0);
+      if (g.userData.hat) g.userData.hat.userData.spin(t);
+      const w = cv.width, h = cv.height, r = Port.r, cam = Port.cam;
+      if (r.domElement.width !== w || r.domElement.height !== h) r.setSize(w, h, false);
+      cam.aspect = w / h; cam.position.set(0, 8, 18); cam.lookAt(0, 3.4, 0); cam.updateProjectionMatrix();
+      Port.scene.add(g); r.render(Port.scene, cam); Port.scene.remove(g);
+      const x = cv.getContext('2d'); x.setTransform(1, 0, 0, 1, 0, 0); x.clearRect(0, 0, w, h); x.drawImage(r.domElement, 0, 0);
+      i++;
+    }
+  },
+};
+
 // ---- 3D ants crawling over the screen (top-down, pixel space), scattering from the cursor --------------------------
 const Crawl = {
   r: null, scene: null, cam: null, cv: null, ants: [], shadowMat: null, built: false,
@@ -251,7 +297,8 @@ const segRow = (label, k, opts, note) => '<div class="tsrow"><span>' + label + (
 const curVal = k => k === 'r3d' ? (R3.enabled ? 'on' : 'off') : k === 'shadows' ? R3.shadows : k === 'relief' ? (R3.relief ? 'on' : 'off') : k === 'tants' ? (antsOn ? 'on' : 'off') : k === 'sound' ? (AL.Audio && AL.Audio.on ? 'on' : 'off') : '';
 function syncSettings() { for (const s of document.querySelectorAll('#tSettings .tseg')) for (const b of s.children) b.classList.toggle('on', b.dataset.v === curVal(s.dataset.k)); }
 function showTab(t) {
-  $('tPlay').hidden = t !== 'play'; $('tSettings').hidden = t !== 'set';
+  $('tPlay').hidden = t !== 'play'; $('tSettings').hidden = t !== 'set'; if ($('tCos')) $('tCos').hidden = t !== 'cos';
+  if (t === 'cos') { Cos.build(); Cos.sync(); }
   for (const b of $('tTabs').children) b.classList.toggle('on', b.dataset.t === t);
   syncSettings();
 }
@@ -260,15 +307,17 @@ function mountUI() {
   if (!$('tTabs')) {
     const h1 = sheet.querySelector('h1');
     const tabs = document.createElement('div'); tabs.id = 'tTabs';
-    tabs.innerHTML = '<button type="button" data-t="play" class="on">Play</button><button type="button" data-t="set">Settings</button>';
+    tabs.innerHTML = '<button type="button" data-t="play" class="on">Play</button><button type="button" data-t="cos">Cosmetics</button><button type="button" data-t="set">Settings</button>';
     const play = document.createElement('div'); play.id = 'tPlay';
     const set = document.createElement('div'); set.id = 'tSettings'; set.hidden = true;
+    const cos = document.createElement('div'); cos.id = 'tCos'; cos.hidden = true;
+    cos.innerHTML = '<h3>Colony hat</h3><p class="mute small" style="margin:2px 0 8px">Your queens, soldiers, majors and winged ants wear it. Rivals get their own hats; online, two colonies on the same hat get different colours of it. Now: <b id="hatNow"></b></p><div id="hatGrid"></div>';
     set.innerHTML = '<h3>Game</h3><div id="tsGame"></div>' +
       '<h3>Graphics</h3>' + segRow('3D models', 'r3d', [['on', 'On'], ['off', 'Classic 2D']]) + segRow('Shadows', 'shadows', [['high', 'High'], ['low', 'Low'], ['off', 'Off']]) +
       segRow('Rolling ground', 'relief', [['on', 'On'], ['off', 'Flat']], 'next game') + segRow('Ants on this screen', 'tants', [['on', 'On'], ['off', 'Off']]) +
       '<h3>Sound</h3>' + segRow('Sound', 'sound', [['on', 'On'], ['off', 'Off']]) +
       '<h3>Keys</h3><p class="mute small" style="margin-top:2px">Space pause · 1 2 3 speed · Tab nest view · H hide trails · M sound · Esc menu · F7 3D / 2D · F8 3D model gallery</p>';
-    h1.after(tabs); tabs.after(play); play.after(set);
+    h1.after(tabs); tabs.after(play); play.after(cos); cos.after(set);
     tabs.onclick = e => { const b = e.target.closest('button'); if (b) showTab(b.dataset.t); };
     set.addEventListener('click', e => {
       const b = e.target.closest('.tseg button'); if (!b) return;
@@ -282,7 +331,7 @@ function mountUI() {
     });
   }
   // everything else in the panel lives on the Play tab (also bits other modules add later)
-  const keep = new Set(['tTabs', 'tPlay', 'tSettings']), play = $('tPlay');
+  const keep = new Set(['tTabs', 'tPlay', 'tSettings', 'tCos']), play = $('tPlay');
   for (const el of [...sheet.children]) if (!keep.has(el.id) && el.tagName !== 'H1' && !el.classList.contains('kicker')) play.appendChild(el);
   const g = $('setRow'); if (g && g.parentElement !== $('tsGame')) $('tsGame').appendChild(g);
   syncSettings();
@@ -320,6 +369,11 @@ body.m3d .kicker{color:#ffb070}
 #tSettings .tseg button:first-child{border-radius:8px 0 0 8px}#tSettings .tseg button:last-child{border-radius:0 8px 8px 0}
 #tSettings .tseg button.on{background:#6a4a16;border-color:#f2c14e;color:#fff}
 .spc canvas{transition:transform .2s}.spc.on canvas{transform:scale(1.12)}
+#hatGrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:8px}
+#hatGrid .hatc{display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 4px 8px;border-radius:12px;background:rgba(0,0,0,.18);border:1px solid rgba(255,210,150,.16);color:#e8d7b6;font-size:12px;font-weight:600}
+#hatGrid .hatc canvas{width:100%;max-width:120px;height:auto;aspect-ratio:120/104}
+#hatGrid .hatc:hover{border-color:rgba(255,210,150,.45)}
+#hatGrid .hatc.on{background:rgba(106,74,22,.75);border-color:#f2c14e;color:#fff}
 `;
   document.head.appendChild(st);
   return true;
@@ -354,7 +408,7 @@ function loop(now) {
   const t = now / 1000; timeU.value = t;
   try {
     active.update(t, dt); renderer.render(active.scene, active.cam);
-    Port.tick(t); Crawl.tick(t, dt);
+    Port.tick(t); Cos.tick(t); Crawl.tick(t, dt);
     if (++tidy % 60 === 0) mountUI();   // bits other modules added to the panel go on the Play tab
   } catch (e) { console.error('[Antlands 3D title]', e); hide(); }
 }

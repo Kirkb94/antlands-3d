@@ -817,6 +817,8 @@ class R3D {
     const FR = [0, 1, 0, 2], CP = this.carried, hasMounds = this.moundList.length > 0;
     const SF = world.surface, BO = world.bridgesWhole > 0 || (world.bridges && world.bridges.length) ? SF.bridgeOwner : null, TSP = SF.tspeed, BI = SF.cell ? 1 / SF.cell : 0, BGW = SF.gw;   // (living bridges: their ants walk on top)
     let drawn = 0;
+    // cosmetic hats (hats.js): x, y, z, heading, scale, hat, variant per wearer; hats3d.js draws the queue
+    const HQ = AL.R3D.hatQ, HW = AL.Hats ? AL.Hats.WEAR : null; HQ.length = 0;
     for (let i = 0; i < n; i++) {   // (groups and the carried pool are begun / ended in render())
       if (!ST[i] || LY[i] !== 0) continue;
       const x = PX[i] + (X[i] - PX[i]) * alpha, y = PY[i] + (Y[i] - PY[i]) * alpha;
@@ -831,6 +833,10 @@ class R3D {
       let h = hasMounds || this.terr ? this.heightAt(x, y) : 0;
       if (BO) { const ci = ((y * BI) | 0) * BGW + ((x * BI) | 0); if (BO[ci] === c + 1 && TSP[ci] < 0.5) h += 3.4; }   // on its colony's living bridge
       pal.group.put(x, h, y, ca, sa, s, FR[(AN[i] | 0) & 3], pal, LG ? LG[i] | (HL[i] ? 0 : 64) : undefined);   // (injuries)
+      if (HW && HW[caste] && cc.hat && !(HL && HL[i])) {
+        const hd = AL.Hats.head(caste, LOOK_OF(cc.colours || cc.sp), LOOKS);
+        HQ.push(x + ca * hd.x * s, h + (ANT_Y + 0.25 + hd.r * 0.62) * s, y + sa * hd.x * s, a, hd.r * s * 1.4, cc.hat.id, cc.hat.v | 0);
+      }
       const k = CR[i];
       if (k) {
         const d = 6.5 * CS[caste].size * (SZ ? SZ[i] : 1), px = x + ca * d, py = y + sa * d, cy = h + 1.5 * s;
@@ -1263,6 +1269,7 @@ const pref = (k, d) => { try { return localStorage.getItem('antlands.' + k) || d
 AL.R3D = { enabled: pref('3d', 'on') !== 'off', shadows: pref('shadows', 'high'), relief: pref('relief', 'on') !== 'off', THREE, gallery: null, antModel, vnoise, LOOKS };
 // for add-on modules (render3d-yard.js): the geometry kit and an update hook run every 3D frame
 AL.R3D.extras = [];
+AL.R3D.hatQ = [];
 AL.R3D.drawing = false;
 AL.R3D.kit = { THREE, Builder, Pool, M, V, col, SPH, SPH_LO, CYL, WHITE, palOf, deadPal, antGeos, moundY };
 // perf panel (F3): where the 3D frame goes

@@ -97,13 +97,19 @@ function conn() { const c = $('mpConn'); if (!c) return; c.textContent = N.statu
 const spName = k => (AL.SPECIES[k] ? AL.SPECIES[k].name : k);
 function perkList(sp) { return AL.Research && AL.Research.perksFor ? AL.Research.perksFor(sp) : []; }
 function perkName(sp, id) { if (!id || id === 'random') return 'random perk'; const p = perkList(sp).find(q => q.id === id); return p ? p.name : 'no perk'; }
+let hatSent = '';
 function showLobby(r) {
   ensure();
   el.hidden = false; if ($('title')) $('title').hidden = true;
   const me = r.players.find(p => p.id === r.you) || {}, host = r.host === r.you, T = TEAM();
+  // your hat (title screen > Cosmetics) goes to the room once per room / pick
+  const H = AL.Hats, myHat = H ? H.saved() : 'none';
+  if (H && me.id != null && (me.hat || 'none') !== myHat && hatSent !== r.code + '|' + myHat) { hatSent = r.code + '|' + myHat; N.set({ hat: myHat }); }
+  const hatName = h => H && h && h !== 'none' ? ' · ' + H.nameOf(h) : '';
+  const hatSel = H ? '<select id="mpHat" title="Your colony\'s hat"><option value="none">No hat</option>' + H.LIST.map(h => '<option value="' + h.id + '"' + (h.id === (me.hat || myHat) ? ' selected' : '') + '>' + esc(h.name) + '</option>').join('') + '</select>' : '';
   const order = AL.SPECIES_ORDER || Object.keys(AL.SPECIES);
   const rows = r.players.map((p, k) => '<div class="pl' + (p.id === r.you ? ' me' : '') + '"><span class="sw" style="background:' + T[k % T.length] + '"></span>' +
-    '<span class="nm"><b>' + esc(p.name) + (p.id === r.host ? ' <span class="mute">(host)</span>' : '') + (p.id === r.you ? ' <span class="mute">· you</span>' : '') + '</b><small>' + esc(spName(p.species)) + ' · ' + esc(perkName(p.species, p.perk)) + '</small></span>' +
+    '<span class="nm"><b>' + esc(p.name) + (p.id === r.host ? ' <span class="mute">(host)</span>' : '') + (p.id === r.you ? ' <span class="mute">· you</span>' : '') + '</b><small>' + esc(spName(p.species)) + ' · ' + esc(perkName(p.species, p.perk)) + esc(hatName(p.hat)) + '</small></span>' +
     '<span class="st' + (p.ready || p.id === r.host ? ' ok' : '') + '">' + (!p.online ? 'offline' : p.id === r.host ? 'host' : p.ready ? 'ready' : 'not ready') + '</span></div>').join('');
   const perks = perkList(me.species);
   const spSel = '<select id="mpSp">' + order.filter(k => AL.SPECIES[k] && (!AL.isPlayable || AL.isPlayable(k))).map(k => '<option value="' + k + '"' + (k === me.species ? ' selected' : '') + '>' + esc(spName(k)) + '</option>').join('') + '</select>';
@@ -116,7 +122,7 @@ function showLobby(r) {
     '<div class="codebox"><span class="code-big">' + esc(r.code) + '</span><button data-a="copy">Copy code</button></div>' +
     '<p class="mute small" style="margin:0">Friends open this same site, press Multiplayer and join with the code.</p>' +
     '<div class="players">' + rows + '</div>' +
-    '<div class="mine"><span class="mute">Your colony</span>' + spSel + pkSel + (host ? '' : '<button data-a="ready" class="' + (me.ready ? 'on' : '') + '">' + (me.ready ? 'Ready ✓' : 'Ready?') + '</button>') + '</div>' +
+    '<div class="mine"><span class="mute">Your colony</span>' + spSel + pkSel + hatSel + (host ? '' : '<button data-a="ready" class="' + (me.ready ? 'on' : '') + '">' + (me.ready ? 'Ready ✓' : 'Ready?') + '</button>') + '</div>' +
     (host ? '<div class="host"><span class="mute">AI rivals</span><button data-a="aiDn"' + (ai <= 0 ? ' disabled' : '') + '>&minus;</button><b>' + ai + '</b><button data-a="aiUp"' + (ai >= maxAi ? ' disabled' : '') + '>+</button>' +
       '<select id="mpLvl">' + ['easy', 'normal', 'hard'].map(l => '<option value="' + l + '"' + (r.settings.aiLevel === l ? ' selected' : '') + '>' + l[0].toUpperCase() + l.slice(1) + ' AI</option>').join('') + '</select></div>' +
       '<div class="host"><span class="mute">Map</span><select id="mpBiome">' + (AL.BIOME_ORDER || []).map(k => '<option value="' + k + '"' + (biome === k ? ' selected' : '') + '>' + esc(AL.BIOMES[k].name) + '</option>').join('') + '</select>' +
@@ -141,6 +147,7 @@ function onClick(e) {
 function onChange(e) {
   if (e.target.id === 'mpSp') N.set({ species: e.target.value, perk: 'random' });
   else if (e.target.id === 'mpPerk') N.set({ perk: e.target.value });
+  else if (e.target.id === 'mpHat') { if (AL.Hats) AL.Hats.save(e.target.value); N.set({ hat: e.target.value }); }
   else if (e.target.id === 'mpLvl') N.settings({ aiLevel: e.target.value });
   else if (e.target.id === 'mpBiome') N.settings({ biome: e.target.value });
   else if (e.target.id === 'mpSize') N.settings({ mapSize: e.target.value });

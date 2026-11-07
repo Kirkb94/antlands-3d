@@ -92,7 +92,7 @@ const send = (p, m) => { if (p.ws && p.ws.open) p.ws.send(JSON.stringify(m)); };
 const each = (room, m) => { const s = JSON.stringify(m), turn = m.t === 'turn'; for (const p of room.players) if (p.ws && p.ws.open && !(turn && p.snapWait)) p.ws.send(s); };   // (a PC waiting for a snapshot gets its turns from the log after it)
 function roomView(room, p) {
   return { t: 'room', code: room.code, you: p.id, host: room.host, state: room.state, settings: room.settings,
-    players: room.players.map(q => ({ id: q.id, name: q.name, species: q.species, perk: q.perk, ready: q.ready, slot: q.slot, online: !!(q.ws && q.ws.open) })) };
+    players: room.players.map(q => ({ id: q.id, name: q.name, species: q.species, perk: q.perk, hat: q.hat || 'none', ready: q.ready, slot: q.slot, online: !!(q.ws && q.ws.open) })) };
 }
 const syncRoom = room => { for (const p of room.players) send(p, roomView(room, p)); };
 
@@ -140,6 +140,8 @@ function checkStart(s, code) {
   if (!list(s.locks, x => typeof x === 'string' && /^[0-9a-f]{64}$/.test(x)) || new Set(s.locks).size !== h) return null;
   const out = { t: 'start', code, seed: s.seed, colonies: s.colonies, aiLevel: s.aiLevel, biome, mapSize, hostSlot: s.hostSlot, locks: s.locks.slice(),
     mp: { humans: h, species: mp.species.slice(), names: mp.names.slice(), perks: mp.perks.slice() } };
+  // hats (cosmetic, optional, not signed: an older start has none)
+  if (mp.hats != null) { if (!list(mp.hats, x => typeof x === 'string' && x.length > 0 && clean(x, 16) === x)) return null; out.mp.hats = mp.hats.slice(); }
   out.sig = sign(out);
   if (KEY && !(typeof s.sig === 'string' && same(s.sig, out.sig))) return null;   // with a fixed key only a start this server signed
   return out;
@@ -258,7 +260,7 @@ function finishRestore(pd) {
     turn: pd.log.length, speed: pd.speed, paused: pd.paused, cmds: [], cmdBytes: 0, log: pd.log, hashes: new Map(), timer: null, start: s, waitT: 0, loadBy: 0, restored: true };
   for (let k = 0; k < s.mp.humans; k++) {
     const q = { id: nextId++, token: crypto.randomBytes(12).toString('hex'), ws: null, room, rateT: 0, rateN: 0,
-      name: s.mp.names[k], species: s.mp.species[k], perk: s.mp.perks[k], ready: true, slot: k, lock: s.locks[k], secret: null,
+      name: s.mp.names[k], species: s.mp.species[k], perk: s.mp.perks[k], hat: (s.mp.hats && s.mp.hats[k]) || 'none', ready: true, slot: k, lock: s.locks[k], secret: null,
       gone: true, inMatch: true, loaded: false, acked: -1, restored: true };
     room.players.push(q); byToken.set(q.token, q);
   }
@@ -299,7 +301,7 @@ function joinRoom(p, room, name) {
   if (room.players.length >= MAX_PLAYERS) return send(p, { t: 'err', msg: 'That room is full (4 players).' });
   leaveRoom(p);
   p.room = room; p.name = clean(name, 16) || 'Player ' + (room.players.length + 1);
-  p.species = PLAYABLE.includes(p.species) ? p.species : PLAYABLE[room.players.length % PLAYABLE.length]; p.perk = p.perk || 'random'; p.ready = false; p.slot = -1;
+  p.species = PLAYABLE.includes(p.species) ? p.species : PLAYABLE[room.players.length % PLAYABLE.length]; p.perk = p.perk || 'random'; p.hat = p.hat || 'none'; p.ready = false; p.slot = -1;
   room.players.push(p);
   syncRoom(room);
 }
@@ -334,7 +336,7 @@ function startMatch(room) {
     t: 'start', code: room.code, seed: crypto.randomInt(1, 2 ** 31 - 1),
     colonies: humans.length + ai, aiLevel: room.settings.aiLevel, biome: room.settings.biome || 'backyard', mapSize: room.settings.mapSize || 'medium',
     hostSlot: Math.max(0, humans.findIndex(p => p.id === room.host)), locks: humans.map(p => p.lock),
-    mp: { humans: humans.length, species: humans.map(p => p.species), names: humans.map(p => p.name), perks: humans.map(p => p.perk) },
+    mp: { humans: humans.length, species: humans.map(p => p.species), names: humans.map(p => p.name), perks: humans.map(p => p.perk), hats: humans.map(p => p.hat || 'none') },
   };
   room.start.sig = sign(room.start);
   room.turn = 0; room.log = []; room.cmds = []; room.cmdBytes = 0; room.speed = 1; room.paused = false;
@@ -398,6 +400,7 @@ function onMessage(p, raw) {
       if (!room || room.state !== 'lobby') return;
       if (m.species != null && PLAYABLE.includes(m.species)) p.species = m.species;
       if (m.perk != null) p.perk = clean(m.perk, 24) || 'random';
+      if (m.hat != null) p.hat = clean(m.hat, 16) || 'none';   // (cosmetic: the colony's hat)
       if (m.name != null) p.name = clean(m.name, 16) || p.name;
       if (m.ready != null) p.ready = !!m.ready;
       return syncRoom(room);

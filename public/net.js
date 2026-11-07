@@ -162,7 +162,7 @@ function beginMatch(m) {
   }
   const slot = m.slot | 0;
   const opts = { seed: m.seed, species: m.mp.species[slot], perk: m.mp.perks[slot], colonies: m.colonies, aiLevel: m.aiLevel, biome: m.biome || 'backyard', mapSize: m.mapSize || 'medium', rivalNests: true,
-    mp: { humans: m.mp.humans, me: slot, species: m.mp.species, names: m.mp.names, perks: m.mp.perks } };
+    mp: { humans: m.mp.humans, me: slot, species: m.mp.species, names: m.mp.names, perks: m.mp.perks, hats: m.mp.hats } };
   N.game = { slot, start: m, queue: [], log: [], cur: null, left: 0, k: -1, lastK: -1, speed: m.speed || 1, paused: !!m.paused, syncing: !!m.resume, catching: !!m.resume, acc: 0, world: null,
     snapWait: !!m.snap, snapParts: [], snapAsk: 0, logBase: 0 };
   if (G.scene && G.scene.end) G.scene.end(G);
