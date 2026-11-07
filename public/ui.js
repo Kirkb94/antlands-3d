@@ -418,7 +418,8 @@ const UI = AL.UI = {
     const season = (env.season || 'spring'); $('clock').hidden = !!AL.World;
     $('clock').innerHTML = '<b>Day ' + (env.day || 1) + '</b> · ' + season[0].toUpperCase() + season.slice(1) + ' · ' + String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0') + (env.rain > 0.1 ? ' · <span class="water">rain</span>' : '') + (env.heat > 0.3 ? ' · <span class="warn">heat</span>' : '') + ' · <span class="mute">' + Math.floor(w.t / 60) + ' min</span>';
     if (UI.clock) UI.clock(w);
-    if (!$('perf').hidden) $('perf').textContent = 'fps ' + P.fps.toFixed(1) + ' (avg ' + (P.samples.length ? P.samples.slice(-10).reduce((a, b) => a + b, 0) / Math.min(10, P.samples.length) : 0).toFixed(1) + ')\nworst frame ' + (P.worstMs || 0).toFixed(0) + ' ms\nants ' + w.ants.count + ' drawn ' + G.renderer.stats.drawn + (w.lod ? ' LOD' : '') + '\nsim ' + P.simMs.toFixed(2) + ' ms render ' + P.renderMs.toFixed(2) + ' ms\nzoom ' + G.renderer.activeCam().z.toFixed(2);
+    if (!$('perf').hidden) $('perf').textContent = 'fps ' + P.fps.toFixed(1) + ' (avg ' + (P.samples.length ? P.samples.slice(-10).reduce((a, b) => a + b, 0) / Math.min(10, P.samples.length) : 0).toFixed(1) + ')\nworst frame ' + (P.worstMs || 0).toFixed(0) + ' ms\nants ' + w.ants.count + ' drawn ' + G.renderer.stats.drawn + (w.lod ? ' LOD' : '') + '\nsim ' + P.simMs.toFixed(2) + ' ms render ' + P.renderMs.toFixed(2) + ' ms\nzoom ' + G.renderer.activeCam().z.toFixed(2) +
+      '\n1% low ' + (P.low1 || 0).toFixed(0) + ' fps  hitches ' + (P.hitches || 0) + '/s' + (AL.R3D && AL.R3D.enabled && AL.R3D.stats ? '\n' + AL.R3D.stats() : '');
     // egg queue shrinks as the queen lays
     if (col.eggQueue && col.eggQueue.length !== UI._ql) { UI._ql = col.eggQueue.length; UI.syncQueue(); }
   },

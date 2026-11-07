@@ -6,7 +6,7 @@ const params = new URLSearchParams(location.search);
 
 const G = AL.Game = {
   world: null, renderer: null, speed: 1, paused: false, running: false,
-  perf: { fps: 0, frameMs: 0, simMs: 0, renderMs: 0, frames: 0, acc: 0, samples: [], worst: 0 },
+  perf: { fps: 0, frameMs: 0, simMs: 0, renderMs: 0, frames: 0, acc: 0, samples: [], worst: 0, hist: new Float32Array(300), hi: 0, hitch: 0, hitches: 0, low1: 0 },
 };
 
 function newGame(opts) {
@@ -85,7 +85,12 @@ function frame(now) {
   if (real > 0.25) real = 0.25;
   // fps over a 1 second window, plus the worst frame in it
   P.frames++; P.acc += real; P.worst = Math.max(P.worst, real);
-  if (P.acc >= 1) { P.fps = P.frames / P.acc; P.worstMs = P.worst * 1000; P.samples.push(P.fps); if (P.samples.length > 30) P.samples.shift(); P.frames = 0; P.acc = 0; P.worst = 0; }
+  // stutter: frame times over the last ~5 s (1% low fps) and frames that took over 25 ms this second
+  P.hist[P.hi++ % P.hist.length] = real * 1000; if (real > 0.025) P.hitch++;
+  if (P.acc >= 1) {
+    const n = Math.min(P.hi, P.hist.length), s = Array.from(P.hist.subarray(0, n)).sort((a, b) => b - a), k = Math.max(0, Math.floor(n * 0.01));
+    P.low1 = s[k] ? 1000 / s[k] : 0; P.hitches = P.hitch; P.hitch = 0;
+    P.fps = P.frames / P.acc; P.worstMs = P.worst * 1000; P.samples.push(P.fps); if (P.samples.length > 30) P.samples.shift(); P.frames = 0; P.acc = 0; P.worst = 0; }
   if (G.scene) {
     try { if (G.scene.update) G.scene.update(G, real); } catch (e) { AL.reportError(e, 'scene update'); }
     try { if (G.scene && G.scene.render) { const c = G.renderer.ctx; c.setTransform(1, 0, 0, 1, 0, 0); G.scene.render(c, G); } } catch (e) { AL.reportError(e, 'scene draw'); }

@@ -56,15 +56,16 @@ function M(x, y, z, sx, sy, sz, rx, ry, rz) {
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const WHITE = new THREE.Color(1, 1, 1);
 class Builder {
-  constructor() { this.pos = []; this.nor = []; this.col = []; }
+  constructor() { this.pos = []; this.nor = []; this.col = []; this.info = []; this.tag = null; }
   add(geo, m, color, fn) {
     const g = geo.index ? geo.toNonIndexed() : geo.clone();
     g.applyMatrix4(m);
-    const p = g.attributes.position.array, n = g.attributes.normal.array;
+    const p = g.attributes.position.array, n = g.attributes.normal.array, T = this.tag;
     for (let i = 0; i < p.length; i += 3) {
       this.pos.push(p[i], p[i + 1], p[i + 2]); this.nor.push(n[i], n[i + 1], n[i + 2]);
       const c = fn ? fn(p[i], p[i + 1], p[i + 2], n[i], n[i + 1], n[i + 2]) : color;
       this.col.push(c.r, c.g, c.b);
+      if (T) this.info.push(T[0], T[1], T[2], T[3]);
     }
     g.dispose();
     return this;
@@ -83,6 +84,8 @@ class Builder {
     g.setAttribute('position', new THREE.Float32BufferAttribute(this.pos, 3));
     g.setAttribute('normal', new THREE.Float32BufferAttribute(this.nor, 3));
     g.setAttribute('color', new THREE.Float32BufferAttribute(this.col, 3));
+    // legInfo (legs geometry only): xyz = the part's root, w = which part (0-5 legs, 6 head parts) for injuries
+    if (this.info.length === this.pos.length / 3 * 4) g.setAttribute('legInfo', new THREE.Float32BufferAttribute(this.info, 4));
     g.computeBoundingSphere();
     return g;
   }
@@ -132,8 +135,10 @@ function antGeos(caste, look) {
       const fx = kx + Math.cos(ang + side * 0.25) * len * 0.62, fy = ky + Math.sin(ang + side * 0.25) * len * 0.62;
       const lift = !dead && sv * tri > 0 ? 0.35 : 0;   // the swinging tripod lifts its feet
       const hip = V(bx, H, by), knee = V(kx, H + 1.05 * sh.leg, ky), foot = V(fx, dead ? H + 0.6 : 0.08 + lift, fy);
+      b.tag = [bx, H, by, (side < 0 ? 0 : 3) + k];   // injury.js bits: 0-2 left front/mid/hind, 3-5 right
       b.seg(hip, knee, 0.24, WHITE).seg(knee, foot, 0.18, WHITE);
     }
+    b.tag = [hx, H + 0.25, 0, 6];   // antennae and jaws go with the head
     const aL = 2.4 * sh.ant;
     for (const s of [-1, 1]) {
       const sw = dead ? 0.6 * s : sv * 0.08 * s, bx = hx + hR * 0.7, by = s * hR * 0.45;
@@ -180,40 +185,58 @@ function putM(mesh, i, x, y, z, ca, sa, sx, sy, sz) {
   e[o + 12] = x; e[o + 13] = y; e[o + 14] = z; e[o + 15] = 1;
 }
 function putC(mesh, i, c) { const a = mesh.instanceColor.array, o = i * 3; a[o] = c.r; a[o + 1] = c.g; a[o + 2] = c.b; }
+// upload only the instances in use (the buffers grow in doubling steps, so most of each is idle); hide empty meshes
+// so the renderer skips them outright (no program / uniform setup, in the colour or the shadow pass)
 function flush(mesh, n) {
-  mesh.count = n;
-  if (n) { mesh.instanceMatrix.needsUpdate = true; mesh.instanceColor.needsUpdate = true; }
+  mesh.count = n; mesh.visible = n > 0;
+  if (!n) return;
+  const im = mesh.instanceMatrix, ic = mesh.instanceColor;
+  im.clearUpdateRanges(); im.addUpdateRange(0, n * 16); im.needsUpdate = true;
+  ic.clearUpdateRanges(); ic.addUpdateRange(0, n * 3); ic.needsUpdate = true;
 }
 
 // one ant shape: 6 meshes (body, head, gaster, 3 leg frames) + wings
 class AntGroup {
   constructor(r3, geos) {
     this.r3 = r3; this.cap = 64; this.n = 0; this.nl = [0, 0, 0, 0];
-    const S = r3.scene, mat = geos.mat || r3.antMat;
+    const S = r3.scene, mat = geos.mat || r3.antMat, lm = r3.legMatOf(mat);
     this.body = mkInst(geos.body, mat, this.cap, S); this.head = mkInst(geos.head, mat, this.cap, S); this.gaster = mkInst(geos.gaster, mat, this.cap, S);
-    this.legs = geos.legs.map(g => mkInst(g, mat, this.cap, S));
+    this.legs = geos.legs.map(g => { const m = mkInst(g, lm.mat, this.cap, S); m.customDepthMaterial = lm.depth; return m; });
     this.wings = geos.wings ? mkInst(geos.wings, r3.wingMat, this.cap, S, false) : null;
+    this.masks = this.legs.map(m => this.maskAttr(m, null));
+  }
+  // per-instance injury mask on the legs (bits 0-5 legs, 6 head; set = still there): the leg shader stumps the rest
+  maskAttr(m, old) {
+    const a = new THREE.InstancedBufferAttribute(new Float32Array(this.cap), 1);
+    a.setUsage(THREE.DynamicDrawUsage); if (old) a.array.set(old.array.subarray(0, Math.min(old.array.length, this.cap)));
+    m.geometry.setAttribute('legMask', a);
+    return a;
   }
   grow() {
     const S = this.r3.scene, cap = this.cap * 2;
     this.body = growInst(this.body, cap, S); this.head = growInst(this.head, cap, S); this.gaster = growInst(this.gaster, cap, S);
-    this.legs = this.legs.map(m => growInst(m, cap, S));
+    this.legs = this.legs.map(m => { const d = m.customDepthMaterial, g = growInst(m, cap, S); g.customDepthMaterial = d; return g; });
     if (this.wings) this.wings = growInst(this.wings, cap, S);
     this.cap = cap;
+    this.masks = this.legs.map((m, k) => this.maskAttr(m, this.masks[k]));
   }
   begin() { this.n = 0; this.nl[0] = this.nl[1] = this.nl[2] = this.nl[3] = 0; }
-  put(x, y, z, ca, sa, s, fr, pal) {
+  // inj: injury mask (injury.js legs bits | 64 if it still has its head); undefined = whole ant
+  put(x, y, z, ca, sa, s, fr, pal, inj) {
     if (this.n >= this.cap) this.grow();
-    const i = this.n++, li = this.nl[fr]++;
+    const i = this.n++, li = this.nl[fr]++, mk = inj === undefined ? 127 : inj, hs = mk & 64 ? s : 0;
     putM(this.body, i, x, y, z, ca, sa, s, s, s); putC(this.body, i, pal.body);
-    putM(this.head, i, x, y, z, ca, sa, s, s, s); putC(this.head, i, pal.head);
+    putM(this.head, i, x, y, z, ca, sa, hs, hs, hs); putC(this.head, i, pal.head);
     putM(this.gaster, i, x, y, z, ca, sa, s, s, s); putC(this.gaster, i, pal.gaster);
-    putM(this.legs[fr], li, x, y, z, ca, sa, s, s, s); putC(this.legs[fr], li, pal.leg);
+    putM(this.legs[fr], li, x, y, z, ca, sa, s, s, s); putC(this.legs[fr], li, pal.leg); this.masks[fr].array[li] = mk;
     if (this.wings) { putM(this.wings, i, x, y, z, ca, sa, s, s, s); putC(this.wings, i, WHITE); }
   }
   end(shadow) {
     flush(this.body, this.n); flush(this.head, this.n); flush(this.gaster, this.n);
-    for (let k = 0; k < 4; k++) flush(this.legs[k], this.nl[k]);
+    for (let k = 0; k < 4; k++) {
+      flush(this.legs[k], this.nl[k]);
+      if (this.nl[k]) { const a = this.masks[k]; a.clearUpdateRanges(); a.addUpdateRange(0, this.nl[k]); a.needsUpdate = true; }
+    }
     if (this.wings) flush(this.wings, this.n);
     this.body.castShadow = this.head.castShadow = this.gaster.castShadow = shadow;
     for (const m of this.legs) m.castShadow = shadow;
@@ -405,7 +428,7 @@ class R3D {
     this.deadSoilMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, metalness: 0, color: 0x8a8a8a });
     this.blobMat = new THREE.MeshStandardMaterial({ roughness: 0.45, metalness: 0.02 });
     this.chunkMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0, flatShading: true });
-    this.groups = new Map();
+    this.groups = new Map(); this.legMats = new Map();
     this.blobs = new Pool(this, new THREE.SphereGeometry(1, 12, 9), this.blobMat);
     this.chunks = new Pool(this, new THREE.IcosahedronGeometry(1, 0), this.chunkMat);
     this.carried = new Pool(this, new THREE.SphereGeometry(1, 8, 6), this.blobMat);
@@ -420,6 +443,20 @@ class R3D {
     this.mounds = new Map(); this.world = null; this.statics = []; this.flowerKey = -1; this.flowerMesh = null;
     this.ok = true;
   }
+  // the ant material for legs: lost legs (injury.js) shrink to a stump at the hip, a lost head takes the antennae and
+  // jaws with it; the same in the shadow pass
+  legMatOf(base) {
+    let e = this.legMats.get(base);
+    if (e) return e;
+    const patch = sh => {
+      sh.vertexShader = 'attribute vec4 legInfo;\nattribute float legMask;\n' + sh.vertexShader.replace('#include <begin_vertex>',
+        '#include <begin_vertex>\n  if (legInfo.w >= 0.0 && mod(floor((legMask + 0.5) / exp2(legInfo.w)), 2.0) < 0.5) transformed = mix(legInfo.xyz, transformed, legInfo.w > 5.5 ? 0.0 : 0.22);');
+    };
+    const mat = base.clone(); mat.onBeforeCompile = patch; mat.customProgramCacheKey = () => 'antLeg';
+    const depth = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking }); depth.onBeforeCompile = patch; depth.customProgramCacheKey = () => 'antLegDepth';
+    e = { mat, depth }; this.legMats.set(base, e);
+    return e;
+  }
   group(caste, look) {
     const key = caste + '|' + look;
     let g = this.groups.get(key);
@@ -432,6 +469,19 @@ class R3D {
   }
   resize() { const r = this.r; if (this.cv.width !== r.w || this.cv.height !== r.h) this.gl.setSize(r.w, r.h, false); }
 
+  // a slow PC: if the game runs under ~45 fps for 4 s straight, step shadows down (high -> low -> off) for this
+  // session, with a note; the Settings choice itself isn't changed. Never kicks in on a machine that keeps up.
+  governor() {
+    const P = AL.Game && AL.Game.perf, now = performance.now();
+    if (!P || AL.Game.paused || AL.R3D.shadows === 'off') { this._slowSince = 0; return; }
+    if (P.frameMs > 22) { if (!this._slowSince) this._slowSince = now; }
+    else this._slowSince = 0;
+    if (this._slowSince && now - this._slowSince > 4000) {
+      this._slowSince = 0;
+      AL.R3D.shadows = AL.R3D.shadows === 'high' ? 'low' : 'off';
+      if (AL.UI && AL.UI.toast) AL.UI.toast('Running slow: 3D shadows set to ' + AL.R3D.shadows + ' (Settings to change)');
+    }
+  }
   // ---- static scenery, rebuilt when the world changes --------------------------------------------------------
   setWorld(world) {
     for (const m of this.statics) { this.scene.remove(m); m.geometry.dispose(); }
@@ -451,6 +501,19 @@ class R3D {
     this.shadowPlane.visible = !this.terr;
     this.addStatic(this.buildRocks(S), this.rockMat);
     this.addStatic(this.buildLogs(S), this.woodMat);
+    this.warm(world);
+  }
+  // pay the one-off costs at load instead of mid-game: every colony's ant models for the castes it can raise
+  // (building one is a few ms, felt as a hitch when your first soldier hatches), the flowers, and the shaders
+  warm(world) {
+    try {
+      for (const c of world.colonies) if (c) for (let k = 0; k <= 6; k++) palOf(this, c.colours || c.sp, k);
+      this.updateFlowers(world.surface);
+      const hidden = [];
+      this.scene.traverse(o => { if ((o.isMesh || o.isInstancedMesh) && !o.visible) { o.visible = true; hidden.push(o); } });
+      this.gl.compile(this.scene, this.cam);
+      for (const o of hidden) o.visible = false;
+    } catch (e) { console.error('[Antlands 3D] warm-up', e); }
   }
   addStatic(geo, mat) {
     if (!geo) return;
@@ -495,11 +558,14 @@ class R3D {
     }
     return b.build();
   }
+  // every flower, cut or not, in one mesh; ranges[i*2..] = flower i's vertices (the mower collapses them, see below)
   buildFlowers(S) {
     const b = new Builder(), c1 = col('#5f9a3e'), c2 = col('#6aa646'), stem = col('#4f8a34');
     const daisy = col('#f4f1e6'), dand = col('#f2c531'), dCore = col('#e8b923'), yCore = col('#d99a1c');
-    for (const f of S.flowers) {
-      if (f.cut) continue;
+    const L = S.flowers, R = this.flowerRanges = new Int32Array(L.length * 2);
+    for (let fi = 0; fi < L.length; fi++) {
+      const f = L[fi];
+      R[fi * 2] = b.pos.length / 3;
       const s = f.s || 1, rot = f.rot || 0, g = this.T(f.x, f.y);
       if (f.kind === 'clover') {
         for (let k = 0; k < 3; k++) {
@@ -516,17 +582,39 @@ class R3D {
         }
         b.add(SPH_LO, M(f.x, top + 0.5 * s, f.y, 2.2 * s, 1.1 * s, 2.2 * s), d ? dCore : yCore);
       }
+      R[fi * 2 + 1] = b.pos.length / 3;
     }
     return b.empty ? null : b.build();
   }
+  // built once per world; mowing / regrowing only rewrites that flower's vertices (collapsed to a point = gone) and
+  // uploads just that slice: no rebuild, so the mower can't stutter the frame
   updateFlowers(S) {
-    if (this.r.frame % 30 && this.flowerKey >= 0) return;
-    let cut = 0; for (const f of S.flowers) if (f.cut) cut++;
-    if (cut === this.flowerKey) return;
-    this.flowerKey = cut;
-    if (this.flowerMesh) { this.scene.remove(this.flowerMesh); this.flowerMesh.geometry.dispose(); this.flowerMesh = null; }
-    const g = this.buildFlowers(S);
-    if (g) { const m = this.flowerMesh = new THREE.Mesh(g, this.plantMat); m.castShadow = true; m.receiveShadow = true; this.scene.add(m); }
+    const L = S.flowers || [];
+    if (this.flowerKey !== L.length) {
+      this.flowerKey = L.length;
+      if (this.flowerMesh) { this.scene.remove(this.flowerMesh); this.flowerMesh.geometry.dispose(); this.flowerMesh = null; }
+      const g = L.length ? this.buildFlowers(S) : null;
+      if (g) {
+        const m = this.flowerMesh = new THREE.Mesh(g, this.plantMat); m.castShadow = true; m.receiveShadow = true; this.scene.add(m);
+        g.attributes.position.setUsage(THREE.DynamicDrawUsage);
+        this.flowerOrig = g.attributes.position.array.slice(); this.flowerCut = new Uint8Array(L.length);
+      }
+    }
+    const m = this.flowerMesh;
+    if (!m || this.r.frame % 10) return;
+    const pa = m.geometry.attributes.position, Pa = pa.array, O = this.flowerOrig, R = this.flowerRanges, st = this.flowerCut;
+    let lo = Infinity, hi = -1;
+    for (let i = 0; i < L.length; i++) {
+      const c = L[i].cut ? 1 : 0;
+      if (c === st[i]) continue;
+      st[i] = c;
+      const a = R[i * 2] * 3, b = R[i * 2 + 1] * 3;
+      if (a === b) continue;
+      if (c) { const x = O[a], y = O[a + 1], z = O[a + 2]; for (let k = a; k < b; k += 3) { Pa[k] = x; Pa[k + 1] = y; Pa[k + 2] = z; } }
+      else Pa.set(O.subarray(a, b), a);
+      if (a < lo) lo = a; if (b > hi) hi = b;
+    }
+    if (hi > 0) { pa.clearUpdateRanges(); pa.addUpdateRange(lo, hi - lo); pa.needsUpdate = true; }
   }
 
   // ---- mounds: a soil dome per colony, rebuilt when it grows ---------------------------------------------------
@@ -670,7 +758,7 @@ class R3D {
   updateAnts(world, alpha, v, z, ox, oy) {
     const r = this.r, A = world.ants, n = A.high;
     const X = A.x, Y = A.y, PX = A.px, PY = A.py, ANG = A.a, ST = A.state, LY = A.layer, COL = A.col, CA = A.caste, AN = A.anim, CR = A.carry;
-    const fog = world.fog, HOST = A.host, CAPT = C.CAPTIVE, ME = world.me || 0, HP = A.hp, MHP = A.maxhp, CS = AL.CASTES, SZ = A.size;
+    const fog = world.fog, HOST = A.host, CAPT = C.CAPTIVE, ME = world.me || 0, HP = A.hp, MHP = A.maxhp, CS = AL.CASTES, SZ = A.size, LG = A.legs, HL = A.headless;
     const cols = world.colonies, x0 = v.x0 - 12, x1 = v.x1 + 12, y0 = v.y0 - 12, y1 = v.y1 + 12;
     const FR = [0, 1, 0, 2], CP = this.carried, hasMounds = this.moundList.length > 0;
     let drawn = 0;
@@ -686,7 +774,7 @@ class R3D {
       const s = CS[caste].size * (cc.sp.size || 1) * (SZ ? SZ[i] : 1) * (ANT_SCALE / 11);
       const a = ANG[i], ca = Math.cos(a), sa = Math.sin(a);
       const h = hasMounds || this.terr ? this.heightAt(x, y) : 0;
-      pal.group.put(x, h, y, ca, sa, s, FR[(AN[i] | 0) & 3], pal);
+      pal.group.put(x, h, y, ca, sa, s, FR[(AN[i] | 0) & 3], pal, LG ? LG[i] | (HL[i] ? 0 : 64) : undefined);   // (injuries)
       const k = CR[i];
       if (k) {
         const d = 6.5 * CS[caste].size * (SZ ? SZ[i] : 1), px = x + ca * d, py = y + sa * d, cy = h + 1.5 * s;
@@ -915,6 +1003,7 @@ class R3D {
     const r = this.r, world = r.world, S = world.surface;
     if (this.world !== world) this.setWorld(world);
     this.resize();
+    this.governor();
     const shq = AL.R3D.shadows;   // settings: shadow quality
     if (shq !== this._shq) {
       this._shq = shq; const n = shq === 'low' ? 1536 : 4096;
@@ -933,6 +1022,7 @@ class R3D {
     sun.target.position.set(cx, 0, cy); sun.position.set(cx + LIGHT_DIR.x * half * 2, LIGHT_DIR.y * half * 2, cy + LIGHT_DIR.z * half * 2);
     sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half; sc.near = 1; sc.far = half * 4 + 200; sc.updateProjectionMatrix();
     sun.shadow.radius = view.z > 2 ? 3 : 1.5;
+    const t0 = performance.now();
     this.updateFlowers(S);
     this.updateMounds(world);
     for (const g of this.groups.values()) g.begin();
@@ -945,7 +1035,13 @@ class R3D {
     const shadow = view.z >= 1.1;
     for (const g of this.groups.values()) g.end(shadow);
     this.carried.end(); this.carried.mesh.castShadow = shadow; this.cEnd();
+    const t1 = performance.now();
     this.gl.render(this.scene, c3);
+    const t2 = performance.now(), M = this.ms || (this.ms = { prep: 0, gl: 0, comp: 0, gpu: 0 });
+    M.prep = M.prep * 0.9 + (t1 - t0) * 0.1; M.gl = M.gl * 0.9 + (t2 - t1) * 0.1;
+    // the slowest 3D frame this second (spikes are what you feel as stutter)
+    const tot = t2 - t0; if (tot > (M.maxNow || 0)) M.maxNow = tot;
+    if (t2 - (M.since || 0) > 1000) { M.spike = M.maxNow || 0; M.maxNow = 0; M.since = t2; }
   }
 }
 const ANT_SCALE = 11;   // (the model is built at worker size; caste and species sizes scale it, as with the sprites)
@@ -1033,7 +1129,9 @@ P.drawSurface = function (ctx, cam, alpha, opacity) {
   try {
     r3.render(cam, view, alpha);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    const tc = performance.now();
     ctx.drawImage(r3.cv, 0, 0);
+    r3.ms.comp = r3.ms.comp * 0.9 + (performance.now() - tc) * 0.1;
   } catch (e) {
     AL.reportError && AL.reportError(e, '3D draw', world);
     AL.R3D.enabled = false;   // fall back to the 2D sprites rather than draw nothing
@@ -1081,6 +1179,12 @@ function antModel(colours, caste) {
 }
 const pref = (k, d) => { try { return localStorage.getItem('antlands.' + k) || d; } catch (_) { return d; } };
 AL.R3D = { enabled: pref('3d', 'on') !== 'off', shadows: pref('shadows', 'high'), relief: pref('relief', 'on') !== 'off', THREE, gallery: null, antModel, vnoise, LOOKS };
+// perf panel (F3): where the 3D frame goes
+AL.R3D.stats = () => {
+  const g = AL.Game && AL.Game.renderer && AL.Game.renderer.r3d; if (!g || !g.ms) return '3D idle';
+  const i = g.gl.info.render, M = g.ms;
+  return '3D prep ' + M.prep.toFixed(2) + ' gl ' + M.gl.toFixed(2) + ' copy ' + M.comp.toFixed(2) + ' ms  spike ' + (M.spike || 0).toFixed(1) + '  shadows ' + AL.R3D.shadows + '\ndraws ' + i.calls + ' tris ' + (i.triangles / 1000).toFixed(0) + 'k  ' + g.cv.width + 'x' + g.cv.height;
+};
 window.addEventListener('keydown', e => {
   if (e.key === 'F8' || e.key === '\\' || e.code === 'Backslash') {   // 3D model gallery: creatures -> carcasses -> ants -> off
     e.preventDefault();
