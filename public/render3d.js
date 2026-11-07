@@ -250,6 +250,12 @@ class Pool {
     if (this.n >= this.cap) { this.cap *= 2; this.mesh = growInst(this.mesh, this.cap, this.r3.scene); }
     const i = this.n++; putM(this.mesh, i, x, y + this.yOff, z, Math.cos(a), Math.sin(a), sx, sy, sz); putC(this.mesh, i, c);
   }
+  // any orientation (quaternion q): wings that flap, tilted parts
+  putQ(x, y, z, q, sx, sy, sz, c) {
+    if (this.n >= this.cap) { this.cap *= 2; this.mesh = growInst(this.mesh, this.cap, this.r3.scene); }
+    _sm.compose(_smid.set(x, y + this.yOff, z), q, _ss.set(sx, sy, sz));
+    const i = this.n++; _sm.toArray(this.mesh.instanceMatrix.array, i * 16); putC(this.mesh, i, c);
+  }
   // a limb: a round segment from a to b (world space)
   seg(a, b, r, c) {
     _sd.subVectors(b, a); const L = _sd.length();
@@ -287,14 +293,17 @@ const CARRY_COL = [null, col('#f6e7b4'), col('#d0674a'), col('#8fd0f0'), col('#a
 const FC = {
   stem: col('#4a3018'), leaf: col('#5a9a3a'), ham: col('#e38a8a'), grub: col('#efe2c2'), grubHead: col('#8a5a2a'),
   beetle: col('#2a3a40'), beetleHead: col('#1d2226'), bug: col('#6a5a3a'), choc: col('#4a2a14'),
+  stem2: col('#4a7a2e'), leaf2: col('#3f7a2c'), aphid: col('#c8e68a'), honey: col('#ffd25a'), seed: col('#8a6a3a'), fluff: col('#f6f2e6'),
+  clover: col('#5c9b3c'), clover2: col('#6eae4a'), grub2: col('#eadcbc'),
   cookie: [col('#d8a868'), col('#c99456'), col('#e2b97c')], sugar: [col('#f4ead2'), col('#e9d8a6')], meat: [col('#c86a4a'), col('#a8543a')],
 };
 const _c = new THREE.Color(), _c2 = new THREE.Color();
 const F3D = new Set(['fruit', 'cookie', 'ham', 'grubs', 'beetle', 'bug']);
+const Y3D = new Set(['honeydew', 'seeds', 'leaves', 'larvae', 'nectar']);   // were flat 2D, now modelled
 const F2D = new Set(['water', 'seeds', 'leaves', 'honeydew', 'larvae', 'nectar']);
 // carcasses drawn as 3D models even though the 2D art registered food drawers for them
 const CARC = new Set(['corpse', 'spider', 'caterpillar', 'ladybug', 'centipede', 'antlion', 'assassin', 'mantis', 'moth', 'cocoon']);
-const is3DFood = f => CARC.has(f.visual) || (!Art.foodDrawers[f.visual] && (F3D.has(f.visual) || !F2D.has(f.visual)));
+const is3DFood = f => CARC.has(f.visual) || Y3D.has(f.visual) || (!Art.foodDrawers[f.visual] && (F3D.has(f.visual) || !F2D.has(f.visual)));
 const angOf = f => f.heading != null ? f.heading + Math.PI : (f.a || 0);
 // dead ants: the colony's colours, dulled
 function deadPal(p) {
@@ -742,6 +751,51 @@ class R3D {
           break;
         }
         case 'bug': B.put(f.x, 1.5, f.y, f.a || 0, 4.5, 1.7, 2.6, FC.bug); break;
+        case 'honeydew': {   // an aphid plant: a leaf rosette round a stem, aphids on it, honeydew beads
+          const p = f.poi || f, R = AL.rng(((p.seed || 1) * 1000) | 0), g = this.T(p.x, p.y);
+          this.frame(p.x, p.y, 0, 1);
+          this.limb(0, 0, 0, 0, 0, 9, 1.3, FC.stem2);
+          for (let k = 0; k < 9; k++) {
+            const a = k / 9 * TAU + R() * 0.3, L = (p.r || 30) * (0.75 + R() * 0.3), h = 2.5 + (k % 3) * 1.6;
+            this.blob(Math.cos(a) * L * 0.5, Math.sin(a) * L * 0.5, h, L * 0.5, 0.5, L * 0.17, a, k & 1 ? FC.leaf : FC.leaf2);
+          }
+          this.blob(0, 0, 9.5, 2.4, 2, 2.4, 0, FC.leaf2);
+          const n = Math.round(p.aphids || 0);
+          for (let k = 0; k < n; k++) { const a = k * 2.39996, d = 8 + (k % 7) * 4.5; this.blob(Math.cos(a) * d, Math.sin(a) * d, 5.6 + (k % 3) * 1.2, 2.4, 1.5, 1.7, a, FC.aphid); }
+          const drops = Math.round(frac * 10);
+          for (let k = 0; k < drops; k++) { const a = k * 1.7 + 0.4, d = 12 + (k % 4) * 6; this.blob(Math.cos(a) * d, Math.sin(a) * d, 6.2 + (k % 3), 1.8, 1.6, 1.8, 0, FC.honey, true); }
+          void g; break;
+        }
+        case 'seeds': {   // seeds with their white fluff
+          const R = AL.rng(f.id * 13 + 1), n = Math.ceil(20 * frac + 1);
+          for (let k = 0; k < n; k++) {
+            const a = R() * TAU, d = Math.sqrt(R()) * f.r, x = f.x + Math.cos(a) * d, y = f.y + Math.sin(a) * d, ang = R() * TAU;
+            Ch.put(x, 0.9, y, ang, 2.6, 0.9, 1.1, FC.seed);
+            B.put(x + Math.cos(ang) * 6.5, 2.6, y + Math.sin(ang) * 6.5, 0, 2.2, 1.6, 2.2, FC.fluff);
+            this.frame(x, y, 0, 1); this.cLimb.seg(this.lw(_va, Math.cos(ang) * 2, Math.sin(ang) * 2, 1), this.lw(_vb, Math.cos(ang) * 6, Math.sin(ang) * 6, 2.4), 0.2, FC.fluff);
+          }
+          break;
+        }
+        case 'leaves': {   // clover: three round leaflets on a short stalk
+          const R = AL.rng(f.id * 17 + 3), n = Math.ceil(16 * frac + 4);
+          for (let k = 0; k < n; k++) {
+            const a = R() * TAU, d = Math.sqrt(R()) * f.r, x = f.x + Math.cos(a) * d, y = f.y + Math.sin(a) * d, r0 = R() * TAU, h = 2 + (k % 3) * 0.8;
+            for (let j = 0; j < 3; j++) { const aj = r0 + j * TAU / 3; B.put(x + Math.cos(aj) * 4.6, h, y + Math.sin(aj) * 4.6, aj, 5, 0.6, 4, j ? FC.clover : FC.clover2); }
+            Ch.put(x, h * 0.5, y, 0, 0.6, h * 0.5, 0.6, FC.stem2);
+          }
+          break;
+        }
+        case 'larvae': {   // a spill of white grubs
+          const R = AL.rng(f.id * 19 + 3), n = Math.ceil(30 * frac + 2);
+          for (let k = 0; k < n; k++) { const a = R() * TAU, d = Math.sqrt(R()) * f.r, r = R() * TAU; B.put(f.x + Math.cos(a) * d, 1.1, f.y + Math.sin(a) * d, r, 2.2, 1.1, 1.2, k % 3 ? FC.grub : FC.grub2); }
+          break;
+        }
+        case 'nectar': {   // a gold bead in the flower's heart, bigger when full
+          if (frac < 0.2 || (f.flower && f.flower.cut)) break;
+          const fl = f.flower, s = (fl && fl.s) || 1, top = (fl ? 4.2 * s + 1.1 * s : 3) + 0.8, r = 0.8 + 1.5 * frac;
+          this.frame(f.x, f.y, 0, 1); this.blob(0, 0, top, r, r * 0.8, r, 0, FC.honey, true);
+          break;
+        }
         default: {
           const R = AL.rng(f.id * 7 + 5), n = Math.ceil(5 * frac + 1), sug = f.kind === K.SUGAR;
           for (let k = 0; k < n; k++) {
@@ -974,6 +1028,12 @@ class R3D {
       (pg === 0 ? live : dead).forEach(([name, fn], i) => { const [x, y] = at(i, 5, 52, 84, 2); this.frame(x, y, spin + i, 1.1); fn(); L.push({ x, y: y + 30, text: name }); });
       return;
     }
+    if (pg === 4 && AL.R3D.showcase) {   // the yard models (render3d-yard.js), off to the side of your mound
+      const sx = p.x + 360, sy = p.y;
+      r.cam.x = sx; r.cam.y = sy; r.cam.z = 1.15;
+      AL.R3D.showcase(this, world, sx, sy, L, t);
+      return;
+    }
     if (pg === 3) {   // every species: worker on top, soldier in the middle, major below
       const keys = Object.keys(AL.SPECIES || {}).filter(k => AL.SPECIES[k] && AL.SPECIES[k].body), FR4 = [0, 1, 0, 2];
       r.cam.z = 3.0;
@@ -1030,6 +1090,12 @@ class R3D {
     this.updateAnts(world, alpha, view, view.z, view.ox, view.oy);
     this.updateFoods(world, view);
     this.updateCreatures(world, view);
+    // add-on models (render3d-yard.js: mower, sprinklers, shoes, robin, flyers, termite mounds, bivouacs...)
+    const tx = performance.now() / 1000;
+    for (const x of AL.R3D.extras) {
+      try { if (!this._xi) this._xi = new Set(); if (!this._xi.has(x)) { this._xi.add(x); x.init(this); } x.update(this, world, view, tx); }
+      catch (e) { if (!x._warned) { x._warned = true; console.error('[Antlands 3D] ' + (x.id || 'extra'), e); } }
+    }
     this.labels = null;
     if (AL.R3D.gallery != null) this.gallery(world);
     const shadow = view.z >= 1.1;
@@ -1106,6 +1172,7 @@ P.drawSieges = function (ctx) {
 const baseDrawSurface = P.drawSurface;
 P.drawSurface = function (ctx, cam, alpha, opacity) {
   const r3 = AL.R3D.enabled ? r3dOf(this) : null;
+  AL.R3D.drawing = false;
   if (!r3) return baseDrawSurface.call(this, ctx, cam, alpha, opacity);
   const world = this.world, S = world.surface, z = cam.z * this.dpr;
   const ox = this.w / 2 - cam.x * z, oy = this.h / 2 - cam.y * z;
@@ -1122,10 +1189,16 @@ P.drawSurface = function (ctx, cam, alpha, opacity) {
   this.drawTreeShade(ctx, 0.5);
   if (this.showTrails) this.drawTrails(ctx, S);
   this.drawFoods2D(ctx, v);
-  for (const c of world.colonies) if (c && c.sp.nomad) this.drawMound(ctx, c, z);
+  // army ants: just the bivouac's shadow here; the heap of clinging ants is 3D (render3d-yard.js)
+  for (const c of world.colonies) {
+    if (!c || !c.sp.nomad || (world.fog && c.id !== AL.me() && !world.fog.seenAt(c.x, c.y))) continue;
+    const n = Math.min(140, 30 + (c.pop[0] + c.pop[1]) * 0.5 | 0), r = 18 + Math.sqrt(n) * 3.2;
+    ctx.fillStyle = 'rgba(20,10,4,0.35)'; ctx.beginPath(); ctx.ellipse(c.x + 4, c.y + 6, r * 1.05, r * 0.95, 0, 0, TAU); ctx.fill();
+  }
   this.layer('underAnts', ctx, view);
-  // 2-3. the 3D scene, composited over the ground
+  // 2-3. the 3D scene, composited over the ground (AL.R3D.drawing: 2D drawers whose thing is modelled stand down)
   this.barBegin(z < 0.8);
+  AL.R3D.drawing = true;
   try {
     r3.render(cam, view, alpha);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -1134,7 +1207,7 @@ P.drawSurface = function (ctx, cam, alpha, opacity) {
     r3.ms.comp = r3.ms.comp * 0.9 + (performance.now() - tc) * 0.1;
   } catch (e) {
     AL.reportError && AL.reportError(e, '3D draw', world);
-    AL.R3D.enabled = false;   // fall back to the 2D sprites rather than draw nothing
+    AL.R3D.enabled = false; AL.R3D.drawing = false;   // fall back to the 2D sprites rather than draw nothing
   }
   // 4. everything over the ants (2D)
   ctx.setTransform(z, 0, 0, z, ox, oy);
@@ -1150,13 +1223,14 @@ P.drawSurface = function (ctx, cam, alpha, opacity) {
   this.layer('grade', ctx, view);
   if (this.showTrails) this.drawTrailGlow(ctx, S);
   this.drawOrders(ctx, view);
-  if (world.fog) this.drawFog(ctx, view);
+  if (world.fog && AL.R3D.gallery !== 4) this.drawFog(ctx, view);   // (the yard showcase is in the clear)
   this.layer('fog', ctx, view);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (this.drawBars) this.drawBars(ctx, view);
   this.layer('screen', ctx, Object.assign({}, view, { z: 1, ox: 0, oy: 0 }));
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 1;
+  AL.R3D.drawing = false;
 };
 
 // a stand-alone ant (title screens): a THREE.Group with the species build and colours; .userData.frame(0|1|2) poses the legs
@@ -1179,6 +1253,10 @@ function antModel(colours, caste) {
 }
 const pref = (k, d) => { try { return localStorage.getItem('antlands.' + k) || d; } catch (_) { return d; } };
 AL.R3D = { enabled: pref('3d', 'on') !== 'off', shadows: pref('shadows', 'high'), relief: pref('relief', 'on') !== 'off', THREE, gallery: null, antModel, vnoise, LOOKS };
+// for add-on modules (render3d-yard.js): the geometry kit and an update hook run every 3D frame
+AL.R3D.extras = [];
+AL.R3D.drawing = false;
+AL.R3D.kit = { THREE, Builder, Pool, M, V, col, SPH, SPH_LO, CYL, WHITE, palOf, deadPal, antGeos, moundY };
 // perf panel (F3): where the 3D frame goes
 AL.R3D.stats = () => {
   const g = AL.Game && AL.Game.renderer && AL.Game.renderer.r3d; if (!g || !g.ms) return '3D idle';
@@ -1189,8 +1267,8 @@ window.addEventListener('keydown', e => {
   if (e.key === 'F8' || e.key === '\\' || e.code === 'Backslash') {   // 3D model gallery: creatures -> carcasses -> ants -> off
     e.preventDefault();
     const g = AL.R3D.gallery;
-    AL.R3D.gallery = g == null ? 0 : g < 3 ? g + 1 : null;
-    if (AL.UI && AL.UI.toast) AL.UI.toast(AL.R3D.gallery == null ? '3D gallery off [F8]' : '3D gallery: ' + ['creatures', 'carcasses', 'ants', 'species'][AL.R3D.gallery] + ' [F8]');
+    AL.R3D.gallery = g == null ? 0 : g < 4 ? g + 1 : null;
+    if (AL.UI && AL.UI.toast) AL.UI.toast(AL.R3D.gallery == null ? '3D gallery off [F8]' : '3D gallery: ' + ['creatures', 'carcasses', 'ants', 'species', 'yard'][AL.R3D.gallery] + ' [F8]');
     return;
   }
   if (e.key !== 'F7') return;

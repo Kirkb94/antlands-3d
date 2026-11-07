@@ -94,6 +94,7 @@ function spriteShadow(ctx, r, col, caste, x, y, a, s, alpha) {
 }
 // a flying reproductive: shadow on the ground (further away the higher she is), body, buzzing wings
 function drawFlyer(ctx, r, col, x, y, a, alt, s, t, male) {
+  if (AL.R3D && AL.R3D.drawing) return;   // (3D: render3d-yard.js flies a model)
   const len = Art.BASE_LEN * AL.CASTES[C.WINGED].size * s;
   // shadow: soft, smaller and further to the lower right the higher she flies
   const so = alt * 34 * s, ss = 1 - alt * 0.3, S0 = RS && RS.shade;
@@ -290,7 +291,7 @@ function drawSatellite(ctx, view, r, world, c, s) {
   ctx.beginPath(); ctx.arc(s.x, s.y, s.moundR + 6, 0, TAU); ctx.stroke(); ctx.setLineDash([]);
 }
 function drawPerched(ctx, view, r, c) {
-  const n = c.royal.queens + c.royal.males; if (!n || view.z < 0.7) return;
+  const n = c.royal.queens + c.royal.males; if (!n || view.z < 0.7 || (AL.R3D && AL.R3D.drawing)) return;   // (3D: modelled)
   const t = view.frame / 60;
   for (let k = 0; k < Math.min(6, n); k++) {
     const male = k >= c.royal.queens, a = -2.2 + k * 0.85, d = c.moundR * 0.52;

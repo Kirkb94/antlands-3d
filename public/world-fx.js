@@ -132,7 +132,7 @@ function underAnts(ctx, v, r) {
     if (cr.type === 'termites') { if (!fog || fog.seenAt(cr.x, cr.y)) WA.drawTermiteMound(ctx, cr, s.t); }
     else if (cr.type === 'cocoon') { if (canSee(w, cr.x, cr.y)) WA.drawCocoon(ctx, cr.x, cr.y, cr.a, 1); }
     else if (cr.type === 'herd') {
-      if (!canSee(w, cr.x, cr.y)) continue;
+      if (!canSee(w, cr.x, cr.y) || (AL.R3D && AL.R3D.drawing)) continue;   // (3D: render3d-yard.js models the aphids)
       const n = Math.min(14, cr.count);
       for (let k = 0; k < n; k++) {
         const a = k * 2.4 + Math.sin(s.t * 3 + k) * 0.2, d = 3 + (k % 4) * 2.3, x = cr.x + Math.cos(a) * d, y = cr.y + Math.sin(a) * d;

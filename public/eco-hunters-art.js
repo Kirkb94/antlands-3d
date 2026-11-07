@@ -162,7 +162,7 @@ function underAnts(ctx, v, r) {
   for (const cr of L) {
     if (cr.type !== 'antlion' || !cr.alive || !inView(v, cr.x, cr.y, 50) || !canSee(w, cr.x, cr.y)) continue;
     drawPit(ctx, cr.x, cr.y, H.pitOf(cr), t, !cr.hidden && cr.state === 'wait' && H.huntsAnts(w, cr));
-    if (!cr.hidden) drawAntlion(ctx, cr.x, cr.y, cr.a, cr.scale || 1, t, { bite: cr.state === 'bite' });
+    if (!cr.hidden && !(AL.R3D && AL.R3D.drawing)) drawAntlion(ctx, cr.x, cr.y, cr.a, cr.scale || 1, t, { bite: cr.state === 'bite' });   // (3D: modelled)
   }
 }
 function overAnts(ctx, v, r) {
