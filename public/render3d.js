@@ -17,6 +17,9 @@ import * as THREE from './vendor/three.module.js';
 const AL = window.AL;
 const Art = AL.Art, TAU = Math.PI * 2, K = AL.CARRY, C = AL.CASTE, P = AL.Renderer.prototype;
 const FOV = 32, TAN = Math.tan(FOV * Math.PI / 360);
+// tilted camera (Settings > Camera): the view leans back this far from straight down, a little more zoomed in
+const TILT_FAR = 32 * Math.PI / 180, TILT_NEAR = 46 * Math.PI / 180;
+const TILT_PX = 2.6e6, TILT_OVER = 0.5;   // pixel budget of each offscreen 2D layer canvas (ground under, overlays over)
 const LIGHT_DIR = new THREE.Vector3(-0.5, 1, -0.62).normalize();   // sun from the upper left, as in the 2D art
 const ANT_Y = 1.5;                                                  // body height above the ground (world units)
 
@@ -374,12 +377,13 @@ class Terrain {
   geometry() {
     const H = this.h, gw = this.gw, gh = this.gh, c = this.cell, step = Math.max(1, Math.ceil(Math.max(gw, gh) / 380)), EX = 9;   // EX: normals exaggerated so the relief reads from above
     const nx = Math.floor((gw - 1) / step) + 1, ny = Math.floor((gh - 1) / step) + 1;
-    const pos = new Float32Array(nx * ny * 3), nor = new Float32Array(nx * ny * 3), idx = new Uint32Array((nx - 1) * (ny - 1) * 6);
+    const pos = new Float32Array(nx * ny * 3), nor = new Float32Array(nx * ny * 3), idx = new Uint32Array((nx - 1) * (ny - 1) * 6), uv = new Float32Array(nx * ny * 2);
     for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
       const gi = i * step, gj = j * step, o = (j * nx + i) * 3;
       const hl = H[gj * gw + Math.max(0, gi - 1)], hr = H[gj * gw + Math.min(gw - 1, gi + 1)], hu = H[Math.max(0, gj - 1) * gw + gi], hd = H[Math.min(gh - 1, gj + 1) * gw + gi];
       const dx = (hr - hl) / (2 * c) * EX, dz = (hd - hu) / (2 * c) * EX, l = Math.sqrt(dx * dx + 1 + dz * dz);
       pos[o] = gi * c; pos[o + 1] = H[gj * gw + gi]; pos[o + 2] = gj * c;
+      uv[(j * nx + i) * 2] = gi * c; uv[(j * nx + i) * 2 + 1] = gj * c;   // (world units: the tilted view's ground texture maps them)
       nor[o] = -dx / l; nor[o + 1] = 1 / l; nor[o + 2] = -dz / l;
     }
     let k = 0;
@@ -388,7 +392,7 @@ class Terrain {
       idx[k++] = a; idx[k++] = cc; idx[k++] = b; idx[k++] = b; idx[k++] = cc; idx[k++] = d;
     }
     const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('normal', new THREE.BufferAttribute(nor, 3)); g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
     g.setIndex(new THREE.BufferAttribute(idx, 1)); g.computeBoundingSphere();
     return g;
   }
@@ -425,6 +429,12 @@ class R3D {
     });
     this.terrShadowMat = new THREE.ShadowMaterial({ color: 0x1a1006, opacity: 0.42, depthTest: false, depthWrite: false });
     this.terr = null;
+    // tilted view: the 2D layers are painted to two offscreen canvases (ground under the models, overlays over them)
+    // and laid on the ground as textures; uv = world units, mapped onto the canvas by the texture's offset / repeat
+    this.tilt = null; this.tb = null;
+    this.groundMat = new THREE.MeshBasicMaterial({ toneMapped: false });
+    this.overMat = new THREE.MeshBasicMaterial({ toneMapped: false, transparent: true, depthTest: false, depthWrite: false });
+    this.ground3d = null; this.over3d = null;
     // materials
     this.antMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.32, metalness: 0.08 });
     this.antGlossMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.14, metalness: 0.12 });
@@ -508,6 +518,18 @@ class R3D {
       this.scene.add(rel, sh); this.statics.push(rel, sh);
     }
     this.shadowPlane.visible = !this.terr;
+    // the tilted view's ground and overlay sheets: the relief's surface, or a flat sheet over the yard
+    {
+      let g = this.terr ? this.terr.geometry() : null;
+      if (!g) {
+        g = new THREE.PlaneGeometry(S.W + 800, S.H + 800, 1, 1).rotateX(-Math.PI / 2).translate(S.W / 2, 0, S.H / 2);
+        const p = g.attributes.position.array, uv = g.attributes.uv.array;
+        for (let k = 0; k < p.length / 3; k++) { uv[k * 2] = p[k * 3]; uv[k * 2 + 1] = p[k * 3 + 2]; }
+      }
+      const gm = this.ground3d = new THREE.Mesh(g, this.groundMat), om = this.over3d = new THREE.Mesh(g, this.overMat);
+      gm.renderOrder = -5; om.renderOrder = 1000; gm.frustumCulled = om.frustumCulled = false; gm.visible = om.visible = false;
+      this.scene.add(gm, om); this.statics.push(gm, om);
+    }
     this.addStatic(this.buildRocks(S), this.rockMat);
     this.addStatic(this.buildLogs(S), this.woodMat);
     this.warm(world);
@@ -1073,10 +1095,72 @@ class R3D {
     if (rv === cc) L.length = 10;
   }
 
-  render(cam, view, alpha) {
+  // ---- tilted view -------------------------------------------------------------------------------------------
+  // the camera for a 2D camera (x, y, zoom): same scale as top-down at the screen's centre, leaning back; returns
+  // the ground rect the screen can see (where its corners meet the ground)
+  setTilt(cam) {
+    const r = this.r, S = r.world.surface, z = cam.z * r.dpr, vh = r.h / z, D = (vh / 2) / TAN;
+    const t = TILT_FAR + (TILT_NEAR - TILT_FAR) * AL.clamp((cam.z - 0.3) / 2.7, 0, 1);
+    const h0 = this.moundList ? this.heightAt(cam.x, cam.y) : this.T(cam.x, cam.y), c3 = this.cam;
+    c3.aspect = r.w / r.h; c3.near = Math.max(0.5, D * 0.12); c3.far = D * 7;
+    c3.position.set(cam.x, h0 + D * Math.cos(t), cam.y + D * Math.sin(t)); c3.lookAt(cam.x, h0, cam.y);
+    c3.updateProjectionMatrix(); c3.updateMatrixWorld();
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const [nx, ny] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 1]]) {
+      const p = this.rayGround(nx, ny, h0, D * 5);
+      if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x; if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y;
+    }
+    const m = 60;
+    x0 = Math.max(-200, x0 - m); y0 = Math.max(-200, y0 - m); x1 = Math.min(S.W + 200, x1 + m); y1 = Math.min(S.H + 200, y1 + m);
+    this.tilt = { x0, y0, x1, y1, D, t, h0 };
+    return this.tilt;
+  }
+  // where a screen point (NDC) meets the ground at height h (at most far away)
+  rayGround(nx, ny, h, far) {
+    const c3 = this.cam, v = _tv.set(nx, ny, 0.5).unproject(c3).sub(c3.position).normalize();
+    let d = v.y < -1e-3 ? (h - c3.position.y) / v.y : far;
+    if (d > far || d < 0) d = far;
+    return { x: c3.position.x + v.x * d, y: c3.position.z + v.z * d };
+  }
+  // a screen pixel -> world point on the (rolling) ground
+  pick(px, py) {
+    const r = this.r, nx = px / r.w * 2 - 1, ny = 1 - py / r.h * 2, far = (this.tilt ? this.tilt.D : 1000) * 8;
+    let h = this.tilt ? this.tilt.h0 : 0, p = null;
+    for (let k = 0; k < 3; k++) { p = this.rayGround(nx, ny, h, far); h = this.heightAt(p.x, p.y); }
+    return p;
+  }
+  // world -> screen pixel (tilted view)
+  project(x, y, h) { const v = _tv.set(x, h == null ? this.heightAt(x, y) : h, y).project(this.cam), r = this.r; return { x: (v.x + 1) / 2 * r.w, y: (1 - v.y) / 2 * r.h }; }
+  // the two offscreen 2D canvases (sized to the screen, within the pixel budget)
+  tiltBufs() {
+    const r = this.r;
+    let cw = Math.ceil(r.w * 1.5), ch = Math.ceil(r.h * 2.2);
+    const f = Math.min(1, Math.sqrt(TILT_PX / (cw * ch))); cw = Math.max(64, Math.floor(cw * f)); ch = Math.max(64, Math.floor(ch * f));
+    let B = this.tb;
+    if (!B || B.cw !== cw || B.ch !== ch) {
+      if (B) { B.ut.dispose(); B.ot.dispose(); }
+      const u = document.createElement('canvas'), o = document.createElement('canvas'); u.width = cw; u.height = ch;
+      o.width = Math.ceil(cw * TILT_OVER); o.height = Math.ceil(ch * TILT_OVER);   // (overlays: a lighter canvas)
+      const tex = cv => { const t = new THREE.CanvasTexture(cv); t.flipY = false; t.colorSpace = THREE.SRGBColorSpace; t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter; t.anisotropy = 4; return t; };
+      B = this.tb = { cw, ch, u, o, uc: u.getContext('2d', { alpha: false }), oc: o.getContext('2d'), ut: tex(u), ot: tex(o) };
+      this.groundMat.map = B.ut; this.overMat.map = B.ot; this.groundMat.needsUpdate = this.overMat.needsUpdate = true;
+    }
+    return B;
+  }
+  // the painted canvases go up; their textures map world units onto the part of the canvas that was drawn
+  tiltUpload(R, k, under) {
+    const B = this.tb;
+    for (const t of under ? [B.ut, B.ot] : [B.ot]) { t.repeat.set(k / B.cw, k / B.ch); t.offset.set(-R.x0 * k / B.cw, -R.y0 * k / B.ch); t.needsUpdate = true; }
+  }
+
+  render(cam, view, alpha, defer) {
     const r = this.r, world = r.world, S = world.surface;
     if (this.world !== world) this.setWorld(world);
-    this.resize();
+    const tilted = !!(defer && this.tilt);
+    if (!tilted) this.resize();   // (tilted: sized by drawTilted, before the 2D passes borrow the renderer's size)
+    if (!tilted) this.tilt = null;
+    if (this.ground3d) this.ground3d.visible = this.over3d.visible = tilted;
+    this.depth.visible = !tilted;
     this.governor();
     const shq = AL.R3D.shadows;   // settings: shadow quality
     if (shq !== this._shq) {
@@ -1084,13 +1168,15 @@ class R3D {
       this.sun.castShadow = shq !== 'off'; this.sun.shadow.mapSize.set(n, n);
       if (this.sun.shadow.map) { this.sun.shadow.map.dispose(); this.sun.shadow.map = null; }
     }
-    const vw = view.x1 - view.x0, vh = view.y1 - view.y0, cx = cam.x, cy = cam.y;
-    // camera straight down, lens fitted so the ground plane matches the 2D view rect exactly
-    const D = (vh / 2) / TAN, c3 = this.cam;
-    c3.aspect = r.w / r.h; c3.near = Math.max(0.5, D * 0.4); c3.far = D + 30;
-    c3.position.set(cx, D, cy); c3.lookAt(cx, 0, cy); c3.updateProjectionMatrix();
+    const vw = view.x1 - view.x0, vh = view.y1 - view.y0, cx = tilted ? (view.x0 + view.x1) / 2 : cam.x, cy = tilted ? (view.y0 + view.y1) / 2 : cam.y;
+    if (!tilted) {
+      // camera straight down, lens fitted so the ground plane matches the 2D view rect exactly
+      const D = (vh / 2) / TAN, c3 = this.cam;
+      c3.aspect = r.w / r.h; c3.near = Math.max(0.5, D * 0.4); c3.far = D + 30;
+      c3.position.set(cx, D, cy); c3.lookAt(cx, 0, cy); c3.updateProjectionMatrix();
+    }
     this.depth.position.set(cx, 0, cy); this.depth.scale.set(vw * 1.2, 1, vh * 1.2);
-    this.shadowPlane.position.set(cx, 0.01, cy); this.shadowPlane.scale.set(vw * 1.2, 1, vh * 1.2);
+    this.shadowPlane.position.set(cx, tilted ? 0.25 : 0.01, cy); this.shadowPlane.scale.set(vw * 1.2, 1, vh * 1.2);
     // sun and its shadow box follow the view
     const half = Math.max(vw, vh) * 0.62 + 60, sun = this.sun, sc = sun.shadow.camera;
     sun.target.position.set(cx, 0, cy); sun.position.set(cx + LIGHT_DIR.x * half * 2, LIGHT_DIR.y * half * 2, cy + LIGHT_DIR.z * half * 2);
@@ -1112,13 +1198,19 @@ class R3D {
     }
     this.labels = null;
     if (AL.R3D.gallery != null) this.gallery(world);
-    const shadow = view.z >= 1.1;
+    const shadow = (tilted ? cam.z * r.dpr : view.z) >= 1.1;
     for (const g of this.groups.values()) g.end(shadow);
     this.carried.end(); this.carried.mesh.castShadow = shadow; this.cEnd();
-    const t1 = performance.now();
-    this.gl.render(this.scene, c3);
-    const t2 = performance.now(), M = this.ms || (this.ms = { prep: 0, gl: 0, comp: 0, gpu: 0 });
-    M.prep = M.prep * 0.9 + (t1 - t0) * 0.1; M.gl = M.gl * 0.9 + (t2 - t1) * 0.1;
+    const t1 = performance.now(), M = this.ms || (this.ms = { prep: 0, gl: 0, comp: 0, gpu: 0 });
+    M.prep = M.prep * 0.9 + (t1 - t0) * 0.1; this._t0 = t0;
+    if (defer) return;   // (tilted: the overlay canvas is painted first, then glRender)
+    this.glRender();
+  }
+  glRender() {
+    const t1 = performance.now(), t0 = this._t0 || t1, M = this.ms;
+    this.gl.render(this.scene, this.cam);
+    const t2 = performance.now();
+    M.gl = M.gl * 0.9 + (t2 - t1) * 0.1;
     // the slowest 3D frame this second (spikes are what you feel as stutter)
     const tot = t2 - t0; if (tot > (M.maxNow || 0)) M.maxNow = tot;
     if (t2 - (M.since || 0) > 1000) { M.spike = M.maxNow || 0; M.maxNow = 0; M.since = t2; }
@@ -1183,11 +1275,100 @@ P.drawSieges = function (ctx) {
     ctx.fillText('Siege: ' + Math.round(a) + ' of yours vs ' + Math.round(d) + ' defenders', c.x, y - 6);
   }
 };
+const _tv = new THREE.Vector3();
+// a canvas context that draws nothing (the under sheet's skipped frames: layers still run their per-frame logic)
+const nullCtx = (() => { const c = document.createElement('canvas'); c.width = c.height = 1; return c.getContext('2d'); })();
+// the tilted surface: every 2D layer is painted (as if top-down) onto two offscreen canvases covering the ground the
+// leaning camera sees, which lie on the 3D ground as textures: 'under' below the models, 'over' (particles, fog,
+// day/night, orders, health bars...) drawn over them. The screen layer still draws on the screen.
+function drawTilted(ctx, cam, alpha, r3) {
+  const world = this.world, S = world.surface;
+  if (r3.world !== world) r3.setWorld(world);
+  r3.resize();
+  const R = r3.setTilt(cam), B = r3.tiltBufs();
+  const k = Math.min(B.cw / (R.x1 - R.x0), B.ch / (R.y1 - R.y0), cam.z * this.dpr * 1.6);
+  const W0 = this.w, H0 = this.h, D0 = this.dpr;
+  const c2 = { x: R.x0 + B.cw / (2 * k), y: R.y0 + B.ch / (2 * k), z: k };
+  const z = k, ox = -R.x0 * k, oy = -R.y0 * k;
+  let view, redrawUnder = true;
+  this.w = B.cw; this.h = B.ch; this.dpr = 1;
+  try {
+    const v = this.viewRect(c2, 0);
+    world.view = this.viewRect(c2, 80);
+    view = Object.assign(v, { z, ox, oy, w: B.cw, h: B.ch, dpr: 1, cam: c2, alpha, scene: 'surface', frame: this.frame });
+    this.lastView = view;
+    // 1. under the models (when the camera holds still, every other frame: the ground sheet is the big upload)
+    const key = cam.x + ',' + cam.y + ',' + cam.z + ',' + B.cw + ',' + B.ch;
+    redrawUnder = key !== r3._ukey || (this.frame & 1) === 0; r3._ukey = key;
+    const u = redrawUnder ? B.uc : nullCtx; u.setTransform(1, 0, 0, 1, 0, 0); u.globalAlpha = 1; u.fillStyle = '#2a2414'; u.fillRect(0, 0, B.cw, B.ch);
+    this.drawGround(u, c2, v, z, ox, oy);
+    u.setTransform(z, 0, 0, z, ox, oy);
+    this.layer('ground', u, view);
+    this.drawTreeShade(u, 0.5);
+    if (this.showTrails) this.drawTrails(u, S);
+    this.drawFoods2D(u, v);
+    for (const c of world.colonies) {
+      if (!c || !c.sp.nomad || (world.fog && c.id !== AL.me() && !world.fog.seenAt(c.x, c.y))) continue;
+      const n = Math.min(140, 30 + (c.pop[0] + c.pop[1]) * 0.5 | 0), rr = 18 + Math.sqrt(n) * 3.2;
+      u.fillStyle = 'rgba(20,10,4,0.35)'; u.beginPath(); u.ellipse(c.x + 4, c.y + 6, rr * 1.05, rr * 0.95, 0, 0, TAU); u.fill();
+    }
+    this.layer('underAnts', u, view);
+    // 2. the models (instances and health bars; drawn after the overlay is painted)
+    const zo = z * TILT_OVER, vo = Object.assign({}, view, { z: zo, ox: ox * TILT_OVER, oy: oy * TILT_OVER, w: B.o.width, h: B.o.height });
+    this.barBegin(cam.z * D0 < 0.8);
+    AL.R3D.drawing = true;
+    r3.render(cam, vo, alpha, true);   // (health bars land in the overlay canvas)
+    // 3. over the models
+    this.lastView = vo;
+    const o = B.oc; o.setTransform(1, 0, 0, 1, 0, 0); o.globalAlpha = 1; o.clearRect(0, 0, B.o.width, B.o.height);
+    o.setTransform(zo, 0, 0, zo, vo.ox, vo.oy);
+    this.drawParticles(o, zo);
+    this.layerSkip('overAnts', o, vo, SKIP_OVER);
+    this.drawSieges(o);
+    this.drawTreeShade(o, 1);
+    if (this.showTrails) this.drawTrailGlow(o, S);
+    this.drawOrders(o, vo);
+    if (world.fog && AL.R3D.gallery !== 4 && AL.R3D.gallery !== 5) this.drawFog(o, vo);
+    this.layer('fog', o, vo);
+    o.setTransform(1, 0, 0, 1, 0, 0);
+    if (this.drawBars) this.drawBars(o, vo);
+  } finally { this.w = W0; this.h = H0; this.dpr = D0; }
+  r3.tiltUpload(R, k, redrawUnder);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.fillStyle = '#17110a'; ctx.fillRect(0, 0, this.w, this.h);
+  const tc = performance.now();
+  r3.glRender();
+  ctx.drawImage(r3.cv, 0, 0);
+  r3.ms.comp = r3.ms.comp * 0.9 + (performance.now() - tc) * 0.1;
+  // what screen-space code reads as the view: a flat stand-in that is right at the screen's centre
+  const pc = r3.project(cam.x, cam.y, R.h0), pr = r3.project(cam.x + 10, cam.y, R.h0), zc = Math.max(0.01, (pr.x - pc.x) / 10);
+  this.lastView = { x0: R.x0, y0: R.y0, x1: R.x1, y1: R.y1, z: zc, ox: pc.x - cam.x * zc, oy: pc.y - cam.y * zc, w: this.w, h: this.h, dpr: this.dpr, cam, alpha, scene: 'surface', frame: this.frame, tilted: true };
+  world.view = { x0: R.x0 - 80, y0: R.y0 - 80, x1: R.x1 + 80, y1: R.y1 + 80 };
+  // weather and the day/night grade work on the finished picture (blend modes), so they go on the screen
+  const sv = this.lastView;
+  ctx.setTransform(sv.z, 0, 0, sv.z, sv.ox, sv.oy);
+  this.layer('weather', ctx, sv);
+  this.layer('grade', ctx, sv);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  this.layer('screen', ctx, Object.assign({}, this.lastView, { z: 1, ox: 0, oy: 0 }));
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1;
+  AL.R3D.drawing = false;
+}
+// clicks in the tilted view: where the pointer meets the ground
+const baseScreenToWorld = P.screenToWorld;
+P.screenToWorld = function (sx, sy, cam) {
+  const r3 = this.r3d;
+  if (!r3 || !r3.tilt || !AL.R3D.enabled || !AL.R3D.tilt || this.view === 'nest' || (cam && cam !== this.cam)) return baseScreenToWorld.call(this, sx, sy, cam);
+  return r3.pick(sx * this.dpr, sy * this.dpr);
+};
 const baseDrawSurface = P.drawSurface;
 P.drawSurface = function (ctx, cam, alpha, opacity) {
   const r3 = AL.R3D.enabled ? r3dOf(this) : null;
   AL.R3D.drawing = false;
   if (!r3) return baseDrawSurface.call(this, ctx, cam, alpha, opacity);
+  if (AL.R3D.tilt && AL.R3D.gallery == null) {
+    try { return drawTilted.call(this, ctx, cam, alpha, r3); }
+    catch (e) { console.error('[Antlands 3D] tilted view', e); AL.R3D.tilt = false; r3.tilt = null; }
+  }
   const world = this.world, S = world.surface, z = cam.z * this.dpr;
   const ox = this.w / 2 - cam.x * z, oy = this.h / 2 - cam.y * z;
   const v = this.viewRect(cam, 0);
@@ -1266,7 +1447,7 @@ function antModel(colours, caste) {
   return g;
 }
 const pref = (k, d) => { try { return localStorage.getItem('antlands.' + k) || d; } catch (_) { return d; } };
-AL.R3D = { enabled: pref('3d', 'on') !== 'off', shadows: pref('shadows', 'high'), relief: pref('relief', 'on') !== 'off', THREE, gallery: null, antModel, vnoise, LOOKS };
+AL.R3D = { enabled: pref('3d', 'on') !== 'off', tilt: pref('tilt', 'on') !== 'off', shadows: pref('shadows', 'high'), relief: pref('relief', 'on') !== 'off', THREE, gallery: null, antModel, vnoise, LOOKS };
 // for add-on modules (render3d-yard.js): the geometry kit and an update hook run every 3D frame
 AL.R3D.extras = [];
 AL.R3D.hatQ = [];

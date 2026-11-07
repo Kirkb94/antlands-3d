@@ -294,7 +294,7 @@ const Crawl = {
 
 // ---- the panel: Play / Settings tabs -------------------------------------------------------------------------
 const segRow = (label, k, opts, note) => '<div class="tsrow"><span>' + label + (note ? ' <em>' + note + '</em>' : '') + '</span><span class="tseg" data-k="' + k + '">' + opts.map(([v, l]) => '<button type="button" data-v="' + v + '">' + l + '</button>').join('') + '</span></div>';
-const curVal = k => k === 'r3d' ? (R3.enabled ? 'on' : 'off') : k === 'shadows' ? R3.shadows : k === 'relief' ? (R3.relief ? 'on' : 'off') : k === 'tants' ? (antsOn ? 'on' : 'off') : k === 'sound' ? (AL.Audio && AL.Audio.on ? 'on' : 'off') : '';
+const curVal = k => k === 'r3d' ? (R3.enabled ? 'on' : 'off') : k === 'tilt' ? (R3.tilt ? 'on' : 'off') : k === 'shadows' ? R3.shadows : k === 'relief' ? (R3.relief ? 'on' : 'off') : k === 'tants' ? (antsOn ? 'on' : 'off') : k === 'sound' ? (AL.Audio && AL.Audio.on ? 'on' : 'off') : '';
 function syncSettings() { for (const s of document.querySelectorAll('#tSettings .tseg')) for (const b of s.children) b.classList.toggle('on', b.dataset.v === curVal(s.dataset.k)); }
 function showTab(t) {
   $('tPlay').hidden = t !== 'play'; $('tSettings').hidden = t !== 'set'; if ($('tCos')) $('tCos').hidden = t !== 'cos';
@@ -313,7 +313,7 @@ function mountUI() {
     const cos = document.createElement('div'); cos.id = 'tCos'; cos.hidden = true;
     cos.innerHTML = '<h3>Colony hat</h3><p class="mute small" style="margin:2px 0 8px">Your queens, soldiers, majors and winged ants wear it. Rivals get their own hats; online, two colonies on the same hat get different colours of it. Now: <b id="hatNow"></b></p><div id="hatGrid"></div>';
     set.innerHTML = '<h3>Game</h3><div id="tsGame"></div>' +
-      '<h3>Graphics</h3>' + segRow('3D models', 'r3d', [['on', 'On'], ['off', 'Classic 2D']]) + segRow('Shadows', 'shadows', [['high', 'High'], ['low', 'Low'], ['off', 'Off']]) +
+      '<h3>Graphics</h3>' + segRow('3D models', 'r3d', [['on', 'On'], ['off', 'Classic 2D']]) + segRow('Camera', 'tilt', [['on', 'Tilted'], ['off', 'Top-down']]) + segRow('Shadows', 'shadows', [['high', 'High'], ['low', 'Low'], ['off', 'Off']]) +
       segRow('Rolling ground', 'relief', [['on', 'On'], ['off', 'Flat']], 'next game') + segRow('Ants on this screen', 'tants', [['on', 'On'], ['off', 'Off']]) +
       '<h3>Sound</h3>' + segRow('Sound', 'sound', [['on', 'On'], ['off', 'Off']]) +
       '<h3>Keys</h3><p class="mute small" style="margin-top:2px">Space pause · 1 2 3 speed · Tab nest view · H hide trails · M sound · Esc menu · F7 3D / 2D · F8 3D model gallery</p>';
@@ -323,6 +323,7 @@ function mountUI() {
       const b = e.target.closest('.tseg button'); if (!b) return;
       const k = b.parentElement.dataset.k, v = b.dataset.v;
       if (k === 'r3d') { R3.enabled = v === 'on'; save('3d', v); }
+      else if (k === 'tilt') { R3.tilt = v === 'on'; save('tilt', v); }
       else if (k === 'shadows') { R3.shadows = v; save('shadows', v); }
       else if (k === 'relief') { R3.relief = v === 'on'; save('relief', v); }
       else if (k === 'tants') { antsOn = v === 'on'; save('titleAnts', v); }
