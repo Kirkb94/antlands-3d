@@ -214,13 +214,12 @@ test('a beetle resting against a log can still be bitten from the log side; one 
   const i = A.spawn(0, C.WORKER, L.SURFACE, x0 - 17, b.y, 0, w.R); fight(i, b);
   run(w, 4);
   assert.ok(b.hp < b.maxHp - 2, 'bitten across the edge of the log: ' + b.hp.toFixed(1) + ' / ' + b.maxHp);
-  // walled in all round: the ant can't get near, so it stops pushing at the wood
+  // walled in all round: the ant climbs over the wood and gets to it (ants climb rocks and logs: behavior.js)
   const hx = gx + 40, hy = gy;
   for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) if (Math.max(Math.abs(dx), Math.abs(dy)) === 3) block(hx + dx, hy + dy);
   const b2 = WC.spawn(w, 'beetle', (hx + 0.5) * cell, (hy + 0.5) * cell, { state: 'wander' }); b2.tx = b2.x; b2.ty = b2.y;
   const j = A.spawn(0, C.WORKER, L.SURFACE, (hx - 4) * cell, (hy + 0.5) * cell, 0, w.R); fight(j, b2);
   for (let k = 0; k < A.high; k++) if (A.state[k] && k !== j && A.layer[k] === L.SURFACE && A.caste[k] !== C.QUEEN) A.kill(k);   // (only ant j is about: others wandering by bite it)
   run(w, 10);
-  assert.equal(b2.hp, b2.maxHp);
-  assert.notEqual(A.state[j], ST.FIGHT, 'gave up on a beetle it can\'t reach');
+  assert.ok(b2.hp < b2.maxHp, 'climbed in and bit it: ' + b2.hp.toFixed(1) + ' / ' + b2.maxHp);
 });

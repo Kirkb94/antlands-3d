@@ -518,6 +518,7 @@ class R3D {
       this.scene.add(rel, sh); this.statics.push(rel, sh);
     }
     this.shadowPlane.visible = !this.terr;
+    this.obs = this.buildObstacles(S);
     // the tilted view's ground and overlay sheets: the relief's surface, or a flat sheet over the yard
     {
       let g = this.terr ? this.terr.geometry() : null;
@@ -704,9 +705,43 @@ class R3D {
       const m = L[k], dx = x - m.x, dy = y - m.y, R = m.R * 1.05;
       if (dx * dx + dy * dy < R * R) { const v = moundY(Math.sqrt(dx * dx + dy * dy), m.R); if (v > h) h = v; }
     }
-    return h + this.T(x, y);
+    const o = this.obsAt(x, y), g = h + this.T(x, y);
+    return o > g ? o : g;   // (on top of a rock or log it's climbing)
   }
   T(x, y) { return this.terr ? this.terr.at(x, y) : 0; }   // terrain height
+  // rocks and logs as heights (ants climb over them: behavior.js): their tops, on a 4-unit grid
+  buildObstacles(S) {
+    const c = 4, gw = Math.ceil(S.W / c) + 1, gh = Math.ceil(S.H / c) + 1, h = new Float32Array(gw * gh);
+    const put = (x0, y0, x1, y1, f) => {
+      const i0 = Math.max(0, Math.floor(x0 / c)), i1 = Math.min(gw - 1, Math.ceil(x1 / c)), j0 = Math.max(0, Math.floor(y0 / c)), j1 = Math.min(gh - 1, Math.ceil(y1 / c));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) { const v = f(i * c, j * c); if (v > h[j * gw + i]) h[j * gw + i] = v; }
+    };
+    for (const r of S.rocks || []) {
+      const hh = Math.min(r.rx, r.ry) * 0.62, g0 = this.T(r.x, r.y), ca = Math.cos(r.rot || 0), sa = Math.sin(r.rot || 0), m = Math.max(r.rx, r.ry);
+      put(r.x - m, r.y - m, r.x + m, r.y + m, (x, y) => {
+        const dx = x - r.x, dy = y - r.y, u = (dx * ca + dy * sa) / r.rx, v = (-dx * sa + dy * ca) / r.ry, t = u * u + v * v;
+        return t < 1 ? g0 + hh * 0.12 + hh * 0.92 * Math.sqrt(1 - t) : 0;
+      });
+    }
+    for (const l of S.logs || []) {
+      const g0 = this.T(l.x, l.y), ca = Math.cos(l.rot || 0), sa = Math.sin(l.rot || 0), m = l.len / 2 + l.r;
+      put(l.x - m, l.y - m, l.x + m, l.y + m, (x, y) => {
+        const dx = x - l.x, dy = y - l.y, al = dx * ca + dy * sa, pe = -dx * sa + dy * ca;
+        if (Math.abs(al) > l.len / 2 || Math.abs(pe) >= l.r) return 0;
+        return g0 + l.r * 0.72 + Math.sqrt(l.r * l.r - pe * pe);
+      });
+    }
+    return { c, gw, gh, h };
+  }
+  obsAt(x, y) {
+    const o = this.obs; if (!o) return 0;
+    let fx = x / o.c, fy = y / o.c;
+    if (fx < 0 || fy < 0 || fx >= o.gw - 1 || fy >= o.gh - 1) return 0;
+    const i = fx | 0, j = fy | 0, u = fx - i, v = fy - j, H = o.h, k = j * o.gw + i;
+    const a = H[k], b = H[k + 1], cc = H[k + o.gw], d = H[k + o.gw + 1];
+    if (!(a || b || cc || d)) return 0;
+    return (a * (1 - u) + b * u) * (1 - v) + (cc * (1 - u) + d * u) * v;
+  }
 
   // ---- food that stands up off the ground -----------------------------------------------------------------
   updateFoods(world, v) {

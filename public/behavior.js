@@ -329,7 +329,8 @@ function updateSurface(world) {
   const X = A.x, Y = A.y, PX = A.px, PY = A.py, ANG = A.a, TURN = A.turn, STATE = A.state, LAYER = A.layer;
   const COL = A.col, CASTE = A.caste, TIMER = A.timer, STR = A.str, WF = A.wf, ANIM = A.anim, HOME = A.home, HOMES = world.homes || world.colonies, NCOL = world.colonies.length;
   const blocked = S.blocked, gw = S.gw, inv = 1 / S.cell, SW = S.W - 2, SH = S.H - 2, TSP = S.tspeed, BRG = S.bridgeOwner;   // TSP: terrain walking speed per cell (terrain.js)
-  const blk = (px, py) => px < 2 || py < 2 || px > SW || py > SH || blocked[((py * inv) | 0) * gw + ((px * inv) | 0)] === 1;
+  // rocks, logs and stumps don't stop an ant: it climbs up and over them, slower (only the yard's edge turns it)
+  const blk = (px, py) => px < 2 || py < 2 || px > SW || py > SH, CLIMB = T.CLIMB || 0.55;
   const food = world.pher.food, avoidOf = world.pher.avoidOf || [world.pher.avoid];
   const hash = world.hash; hash.clear();
   const tick = world.tick, view = world.mp ? world.mpView || AL.Sim.ALL : world.view, lod = world.lod;   // (multiplayer: the same view on every PC, sim.js mpView)
@@ -369,6 +370,7 @@ function updateSurface(world) {
       if (BRG && k < 0.5 && BRG[ci] === c + 1) k = 1;
       spd *= k;
     }
+    if (blocked[((Y[i] * inv) | 0) * gw + ((X[i] * inv) | 0)] === 1) spd *= CLIMB;   // climbing a rock or log
     const sense = ((i + tick) % 3) === 0;
     // fight injuries (injury.js): lost legs slow it, one side gone sends it round in circles, a headless ant
     // stumbles about blind (its state machine is skipped)
