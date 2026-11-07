@@ -140,7 +140,6 @@ const UI = AL.UI = {
     if (id === 'xtunnel') return !!(c && c.research && c.research.tunnel >= 1);
     if (id === 'xrally') return !!(w && w.exp);
     if (id === 'link') return !!(c && c.mods && c.mods.nestlink);
-    if (id === 'bridge') { const S = w && w.surface; return !!(S && S.terrainCounts && S.terrainCounts[AL.TERRAIN.STREAM] > 0); }   // (maps with water)
     return true;
   },
   toolSig() { return ['xflight', 'xtunnel', 'xrally', 'link'].map(id => UI.toolAvailable(id) ? 1 : 0).join(''); },

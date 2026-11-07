@@ -97,10 +97,11 @@ function streamPlan(seed, B, ext, avoid) {
   const h = k => AL.hash2(seed | 0, k, 909), n = Math.max(1, Math.round(B.streams * 2 + h(1) * 0.9 - 0.2)), out = [];
   for (let s = 0; s < n; s++) {
     let band = null;
-    for (let tryN = 0; tryN < 24 && !band; tryN++) {
+    for (let tryN = 0; tryN < 48 && !band; tryN++) {
       const k = 10 + s * 50 + tryN * 2, a = h(k) * Math.PI, nx = Math.cos(a), ny = Math.sin(a);
       const b = { nx, ny, off: (h(k + 1) - 0.5) * ext * 0.9, amp: 90 + h(k + 2) * 160, w: 14 + h(k + 3) * 10 * B.streams, ph: h(k + 4) * 50 };
-      if ((avoid || []).every(p => Math.abs(across(b, p[0], p[1], seed)) > b.w + 170) && out.every(o => Math.abs(o.nx * nx + o.ny * ny) < 0.95 || Math.abs(o.off - b.off) > 400)) band = b;
+      const clear = tryN < 24 ? 170 : 40;   // (a crowded map: rivers may pass closer to a nest, never over it)
+      if ((avoid || []).every(p => Math.abs(across(b, p[0], p[1], seed)) > b.w + clear) && out.every(o => Math.abs(o.nx * nx + o.ny * ny) < 0.95 || Math.abs(o.off - b.off) > 400)) band = b;
     }
     if (band) out.push(band);
   }
