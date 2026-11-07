@@ -440,7 +440,7 @@ R3.showcase = function (r3, world, cx, cy, L, t) {
 // ---- living ant bridge: ants locked leg-to-leg in 3 lanes across the water, sagging a little in the middle -------
 // build 0..1: the chain grows out from both banks and meets in the middle; walkers: ants crossing on top
 const BR = { lanes: [-4.2, 0, 4.2] };
-function antBridge(r3, pal, x0, y0, x1, y1, build, t, walkers, wpal) {
+function antBridge(r3, pal, x0, y0, x1, y1, build, t, walkers, wpal, oneSide) {
   const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L, nx = -uy, ny = ux, step = 6.2;
   const n = Math.max(2, Math.floor(L / step)), half = build * 0.5, a = Math.atan2(dy, dx), g0 = r3.T(x0, y0);
   const fr = (r3.r.frame >> 2);
@@ -449,15 +449,15 @@ function antBridge(r3, pal, x0, y0, x1, y1, build, t, walkers, wpal) {
     const off = BR.lanes[li];
     for (let k = 0; k <= n; k++) {
       const u = k / n;
-      if (u > half && u < 1 - half) continue;                              // not built yet
+      if (oneSide ? u > build + 1e-6 : (u > half && u < 1 - half)) continue;   // not built yet (a real bridge grows from its near bank)
       const sway = Math.sin(t * 2 + k * 0.7 + li) * 0.35, x = x0 + ux * u * L + nx * (off + sway), y = y0 + uy * u * L + ny * (off + sway);
       const hd = a + ((k + li) & 1 ? PI : 0) + Math.sin(k * 1.3 + li) * 0.25; // alternate ants face opposite ways, legs hooked
       pal.group.put(x, hAt(u) + (li === 1 ? 0.5 : 0), y, Math.cos(hd), Math.sin(hd), 1, (k + li) % 3, pal);   // (still: legs hooked into the next ant)
     }
   }
   // the building fronts: fresh ants scrambling out along the chain to lock on
-  if (build < 1) for (const side of [0, 1]) for (let k = 0; k < 3; k++) {
-    const u0 = side ? 1 - half : half, dir = side ? 1 : -1, ph = (t * 0.6 + k / 3) % 1, u = u0 + dir * (1 - ph) * 0.25;
+  if (build < 1) for (const side of (oneSide ? [0] : [0, 1])) for (let k = 0; k < 3; k++) {
+    const u0 = oneSide ? build : side ? 1 - half : half, dir = side ? 1 : -1, ph = (t * 0.6 + k / 3) % 1, u = u0 + dir * (1 - ph) * 0.25;
     if (u < 0 || u > 1) continue;
     const x = x0 + ux * u * L + nx * BR.lanes[k], y = y0 + uy * u * L + ny * BR.lanes[k], hd = a + (side ? PI : 0);
     pal.group.put(x, hAt(u) + 3, y, Math.cos(hd), Math.sin(hd), 1, FR[(fr + k) & 3], pal);
@@ -511,7 +511,23 @@ Yard.update = function (r3, world, v, t) {
   if (R3.gallery !== 5) R3.bridgeHide();
   this.mower.scale.setScalar(1);
   if (R3.gallery === 4) { this.water.begin(); this.clips.begin(); this.bwing.begin(); for (const s of this.shoes) s.visible = false; this.robin.visible = false; this.mower.visible = false; return; }
-  return baseUpdate.call(this, r3, world, v, t);
+  const out = baseUpdate.call(this, r3, world, v, t);
+  if (R3.gallery == null) worldBridges(r3, world, v, t);
+  return out;
 };
+// the colonies' living bridges (bridges.js): their ants locked together over the stream, growing from the near bank
+function worldBridges(r3, world, v, t) {
+  const Bs = world.bridges; if (!Bs || !Bs.length) return;
+  const fog = world.fog, me = world.me || 0;
+  for (const b of Bs) {
+    if (b.gone || !b.locked) continue;
+    const mnx = Math.min(b.x0, b.x1) - 20, mxx = Math.max(b.x0, b.x1) + 20, mny = Math.min(b.y0, b.y1) - 20, mxy = Math.max(b.y0, b.y1) + 20;
+    if (mxx < v.x0 || mnx > v.x1 || mxy < v.y0 || mny > v.y1) continue;
+    if (b.col !== me && fog && !fog.visibleAt((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2) && !fog.visibleAt(b.x0, b.y0) && !fog.visibleAt(b.x1, b.y1)) continue;
+    const c = world.colonies[b.col]; if (!c) continue;
+    const pal = palOf(r3, c.colours || c.sp, C.WORKER);
+    antBridge(r3, pal, b.x0, b.y0, b.x1, b.y1, b.whole ? 1 : Math.min(0.999, b.locked / b.need), t, 0, null, true);
+  }
+}
 R3.extras.push(Yard);
 }

@@ -49,7 +49,7 @@ function rallyHandler(world, i, dt, sense) {
 }
 
 // ---- recruitment: an order with a path and a head count ----
-function addRecruit(world, col, pts, want, hid) {
+function addRecruit(world, col, pts, want, hid, extra) {
   const c = world.colonies[col], hm = hid != null && world.homes && world.homes[hid], from = hm && hm.id === col && !hm.gone ? hm : c;
   c.orders = c.orders || [];
   // thin the path to ~30-unit steps
@@ -61,6 +61,7 @@ function addRecruit(world, col, pts, want, hid) {
   const oid = world.nextOrder || 1; world.nextOrder = oid + 1;   // (per world: every PC numbers orders the same)
   const o = { id: oid, pts: path, want, assigned: 0, arrived: 0, t: world.t, done: false };
   if (hid != null) o.hid = hid;
+  if (extra) Object.assign(o, extra);   // (o.castes, o.bridge: bridges.js)
   c.orders.push(o);
   AL.emit(world, 'recruitOrder', { col, order: o });
   return o;
@@ -107,7 +108,8 @@ function recruitHandler(world, i, dt, sense) {
     if (wp >= o.pts.length) {
       o.arrived++;
       const end = o.pts[o.pts.length - 1];
-      if (o.raid != null && AL.AINest) { AL.AINest.charge(world, i, o); return 0; }   // an AI rival's raid party charges from here (ai-nest.js)
+      if (o.raid != null && AL.AINest) { AL.AINest.charge(world, i, o); return 0; }
+      if (o.bridge != null && AL.Bridges && AL.Bridges.arrive(world, i, o)) return 2;   // locks on to a living bridge (bridges.js): gone from the ground   // an AI rival's raid party charges from here (ai-nest.js)
       if (A.caste[i] === C.SOLDIER || A.caste[i] === C.MAJOR) { A.state[i] = ST.GUARD; A.tx[i] = end.x; A.ty[i] = end.y; A.timer[i] = 60 + world.R() * 30; }
       else { A.state[i] = ST.WANDER; A.timer[i] = 0; }
       return 0;

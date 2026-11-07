@@ -352,7 +352,7 @@ function broodRaidHandler(world, i, dt, sense) {
 // workers, so the captives stay home and keep working. A path that ends on a rival mound is a slave raid.
 AL.on('recruitOrder', (world, d) => {
   const col = world.colonies && world.colonies[d.col], o = d.order, A = world.ants;
-  if (!col || !col.sp.raider || !col.nest || !o) return;
+  if (!col || !col.sp.raider || !col.nest || !o || o.castes) return;   // (orders for given castes, e.g. bridge builders, pick their own)
   const end = o.pts[o.pts.length - 1];
   const tgt = nearestOther(world, col, c => AL.dist2(c.x, c.y, end.x, end.y) < AL.pow(c.moundR + 120, 2));
   if (tgt) o.raidOn = tgt.id;

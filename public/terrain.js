@@ -24,7 +24,7 @@ const INFO = AL.TERRAIN_INFO = [
   { key: 'gravel', name: 'Gravel',      speed: 1.12, fade: 0.965, prey: 0.3,  col: '#a39a8a', tip: 'Fast, firm footing; trails fade quickly; almost nothing lives in it.' },
   { key: 'mud',    name: 'Mud',         speed: 0.72, fade: 1,     prey: 1.2,  col: '#6b5236', tip: 'Slow going. Nests on mud flood first when it rains.' },
   { key: 'litter', name: 'Leaf litter', speed: 0.85, fade: 1,     prey: 1.8,  col: '#7a5a2e', tip: 'Cluttered and slow, but full of small prey for hunters and army ant swarms.' },
-  { key: 'stream', name: 'Stream',      speed: 1,    fade: 0,     prey: 0,    col: '#4a86b8', tip: 'Running water: ants can\'t cross it except on a twig bridge.' },
+  { key: 'stream', name: 'Stream',      speed: 1 / 3, fade: 0,    prey: 0,    col: '#4a86b8', tip: 'Running water: ants swim it at a third of their walking speed, or cross on a living ant bridge (the Bridge tool).' },
   { key: 'bridge', name: 'Twig bridge', speed: 0.8,  fade: 1,     prey: 0,    col: '#8a6a3e', tip: 'A twig across the stream.' },
 ];
 
@@ -39,8 +39,8 @@ const BIOMES = AL.BIOMES = {
     key: 'backyard', name: 'Backyard', blurb: 'The lawn behind the house: people walk through, the mower comes round, and there\'s a picnic in the middle.',
     humans: true, centre: 'spill', ground: '#5b8a3b',
     pick: (a, b, c) => (b > 0.68 ? T.SAND : a < 0.36 ? T.MUD : a > 0.66 ? T.LITTER : c > 0.72 ? T.GRAVEL : T.GRASS),
-    weather: { rain: 1, heat: 1, temp: 0 }, flood: 1,
-    terrain: ['grass', 'sand', 'gravel', 'mud', 'litter'],
+    weather: { rain: 1, heat: 1, temp: 0 }, flood: 1, streams: 0.5,
+    terrain: ['grass', 'sand', 'gravel', 'mud', 'litter', 'stream'],
   },
   forest: {
     key: 'forest', name: 'Forest floor', blurb: 'Deep leaf litter under the trees: shady, slow going, and crawling with prey. More spiders and beetles.',
@@ -49,7 +49,7 @@ const BIOMES = AL.BIOMES = {
     weather: { rain: 1.2, heat: 0.4, temp: -3 }, flood: 1, streams: 0.6,
     creatures: { spider: 1.5, beetle: 1.5, ladybug: 0.8 },
     edge: { army: { lay: 1.08 }, bullet: { hp: { all: 1.08 } }, carpenter: { dig: 1.25, life: 1.05 } },
-    terrain: ['litter', 'grass', 'mud', 'gravel', 'stream', 'bridge'],
+    terrain: ['litter', 'grass', 'mud', 'gravel', 'stream'],
   },
   desert: {
     key: 'desert', name: 'Desert', blurb: 'Sand and gravel under a hard sun. Little rain, few plants, lots of seed.',
@@ -67,7 +67,7 @@ const BIOMES = AL.BIOMES = {
     weather: { rain: 1.8, heat: 0.6, temp: -1 }, flood: 1.4, streams: 1, waterTable: -8,
     creatures: { caterpillar: 1.3, ladybug: 1.2 },
     edge: { carpenter: { hp: { all: 1.08 }, life: 1.08 }, fire: { lay: 1.05 }, leafcutter: { fungus: 1.08 } },
-    terrain: ['mud', 'grass', 'litter', 'sand', 'stream', 'bridge'],
+    terrain: ['mud', 'grass', 'litter', 'sand', 'stream'],
   },
 };
 AL.BIOME_ORDER = ['backyard', 'forest', 'desert', 'wetland'];
@@ -107,10 +107,9 @@ function generate(world) {
     // where another field is high
     if (B.streams && !flat) {
       const s = AL.fbm(u / 980 - 1.7, v / 980 + 6.1, seed + 404, 3);
-      if (Math.abs(s - 0.5) < STREAM_W * B.streams && !keepClear(x, y)) t = AL.fbm(u / 260 + 9.9, v / 260 - 3.3, seed + 505, 2) > 0.64 ? T.BRIDGE : T.STREAM;
+      if (Math.abs(s - 0.5) < STREAM_W * B.streams && !keepClear(x, y)) t = T.STREAM;   // (swimmable: no twig bridges, ants build living ones)
     }
     ter[i] = t;
-    if (t === T.STREAM) S.blocked[i] = 1;
   }
   if (!flat) connect(S, nests.length ? nests : [{ x: S.W / 2, y: S.H / 2 }], pois);
   S.biome = B.key;

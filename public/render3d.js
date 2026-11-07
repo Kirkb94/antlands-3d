@@ -815,6 +815,7 @@ class R3D {
     const fog = world.fog, HOST = A.host, CAPT = C.CAPTIVE, ME = world.me || 0, HP = A.hp, MHP = A.maxhp, CS = AL.CASTES, SZ = A.size, LG = A.legs, HL = A.headless;
     const cols = world.colonies, x0 = v.x0 - 12, x1 = v.x1 + 12, y0 = v.y0 - 12, y1 = v.y1 + 12;
     const FR = [0, 1, 0, 2], CP = this.carried, hasMounds = this.moundList.length > 0;
+    const SF = world.surface, BO = world.bridgesWhole > 0 || (world.bridges && world.bridges.length) ? SF.bridgeOwner : null, TSP = SF.tspeed, BI = SF.cell ? 1 / SF.cell : 0, BGW = SF.gw;   // (living bridges: their ants walk on top)
     let drawn = 0;
     for (let i = 0; i < n; i++) {   // (groups and the carried pool are begun / ended in render())
       if (!ST[i] || LY[i] !== 0) continue;
@@ -827,7 +828,8 @@ class R3D {
       const pal = palOf(this, cc.colours || cc.sp, caste);
       const s = CS[caste].size * (cc.sp.size || 1) * (SZ ? SZ[i] : 1) * (ANT_SCALE / 11);
       const a = ANG[i], ca = Math.cos(a), sa = Math.sin(a);
-      const h = hasMounds || this.terr ? this.heightAt(x, y) : 0;
+      let h = hasMounds || this.terr ? this.heightAt(x, y) : 0;
+      if (BO) { const ci = ((y * BI) | 0) * BGW + ((x * BI) | 0); if (BO[ci] === c + 1 && TSP[ci] < 0.5) h += 3.4; }   // on its colony's living bridge
       pal.group.put(x, h, y, ca, sa, s, FR[(AN[i] | 0) & 3], pal, LG ? LG[i] | (HL[i] ? 0 : 64) : undefined);   // (injuries)
       const k = CR[i];
       if (k) {

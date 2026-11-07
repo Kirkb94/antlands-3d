@@ -536,6 +536,7 @@ function fightCreature(world, i, dt) {
   const A = world.ants, crs = world.surface.creatures;
   // (looked up by id: A.wp holds a recruit's waypoint, which it goes back to after the fight)
   let cr = null; for (let k = 0; k < crs.length; k++) if (crs[k].id === A.tuid[i]) { cr = crs[k]; break; }
+  if (!cr && AL.Bridges && A.tuid[i] >= AL.Bridges.ID0) cr = AL.Bridges.endById(world, A.tuid[i]);   // an end ant of a living bridge
   if (!cr || !cr.alive || cr.hp <= 0 || cr.hidden || cr.flying) { lost(world, i); return 0; }   // (gone under the sand or into the air: out of reach)
   const dx = cr.x - A.x[i], dy = cr.y - A.y[i], d = Math.sqrt(dx * dx + dy * dy);
   if (d > cr.r + 60) { disengage(world, i); return 0; }
@@ -555,7 +556,7 @@ function fightCreature(world, i, dt) {
   cr.hp -= s.dps * s.vsBig * dt * (1 - (cr.armor || 0) * (1 - s.pierce));
   world.pher.alarm[A.col[i]].deposit(A.x[i], A.y[i], 0.3 * dt * 30);
   if (world.R() < dt * 1.5) world.fxq.push(4, A.x[i] + dx / d * 3, A.y[i] + dy / d * 3, 0);
-  if (cr.hp <= 0) creatureDied(world, cr, A.col[i]);
+  if (cr.hp <= 0) { if (cr.bridgeEnd) AL.Bridges.endDied(world, cr, A.col[i]); else creatureDied(world, cr, A.col[i]); }
   return 1;
 }
 function creatureDied(world, cr, col) {
@@ -638,6 +639,22 @@ function tick(world, dt) {
       if (!ag || !reach(A, i, world)) continue;
       if (ST_[i] === ST.DRAG && AL.Behavior) AL.Behavior.releaseDrag(world, i);
       A.prev[i] = ST_[i]; ST_[i] = ST.FIGHT; A.tgt[i] = -1; A.tuid[i] = cr.id; A.timer[i] = 0;
+    }
+  }
+  // living bridges (bridges.js): enemy soldiers, raiders and guards bite the end ants (they don't bite back)
+  const bes = world.bridgeEnds;
+  if (bes && bes.length && AL.World && AL.World.antsIn) for (let k = 0; k < bes.length; k++) {
+    const e = bes[k];
+    if (!e.alive) continue;
+    e.attackers = e._hits || 0; e._hits = 0;
+    if ((tick + k) % 3) continue;
+    const rr = e.r + 14, nn = AL.World.antsIn(world, e.x, e.y, rr, BUF);
+    for (let q = 0; q < nn; q++) {
+      const i = BUF[q], s = ST_[i];
+      if (COL[i] === e.owner || s === ST.FIGHT || A.caste[i] === C.QUEEN) continue;
+      if (!(aggressive(A.caste[i]) || s === ST.RAID || s === ST.RALLY || s === ST.GUARD) || !reach(A, i, world)) continue;
+      if (s === ST.DRAG && AL.Behavior) AL.Behavior.releaseDrag(world, i);
+      A.prev[i] = s; ST_[i] = ST.FIGHT; A.tgt[i] = -1; A.tuid[i] = e.id; A.timer[i] = 0;
     }
   }
   // nest: raiders vs defenders (few raiders, so a direct scan is cheap)

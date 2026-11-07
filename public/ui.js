@@ -7,11 +7,11 @@ let G = null, t = 0, typed = '';
 const $ = id => document.getElementById(id);
 const fmt = v => v >= 10000 ? (v / 1000).toFixed(0) + 'k' : v >= 1000 ? (v / 1000).toFixed(1) + 'k' : Math.floor(Math.max(0, v)).toString();
 const widgets = new Map();
-const SURFACE_TOOLS = ['look', 'food', 'alarm', 'avoid', 'collect', 'raid', 'send', 'link', 'march', 'swarm', 'erase', 'xrally', 'xflight', 'xtunnel'];
+const SURFACE_TOOLS = ['look', 'food', 'alarm', 'avoid', 'collect', 'bridge', 'raid', 'send', 'link', 'march', 'swarm', 'erase', 'xrally', 'xflight', 'xtunnel'];
 const NEST_TOOLS = ['look', 'dig', 'chamber', 'fill'];
-const TOOL_LABEL = { raid: 'Raid', send: 'Send', link: 'Link', xrally: 'Rally', xflight: 'Fly queen', xtunnel: 'Tunnel', march: 'March', swarm: 'Swarm raid', look: 'Look', food: 'Food trail', alarm: 'Alarm', avoid: 'Avoid', collect: 'Collect', erase: 'Erase', dig: 'Dig', chamber: 'Chamber', fill: 'Undo' };
-const TOOL_KEYS = { raid: 'I', send: 'O', link: 'P', xrally: 'Y', xflight: 'L', xtunnel: 'K', march: 'B', swarm: 'Z', look: 'Q', food: 'F', alarm: 'R', avoid: 'V', collect: 'T', erase: 'E', dig: 'G', chamber: 'C', fill: 'X' };
-const TOOL_SWATCH = { raid: '#ff6a4a', send: '#9fd37a', link: '#c99a62', xrally: '#ff9a5a', xflight: '#f6d77a', xtunnel: '#a0744a', march: '#e0a060', swarm: '#d9784a', food: '#f2c14e', alarm: '#ef5a3c', avoid: '#a77be0', collect: '#e8b04a', erase: '#bbb', dig: '#ffb050', chamber: '#f0e6c8', fill: '#999', look: '#e9dcc0' };
+const TOOL_LABEL = { bridge: 'Bridge', raid: 'Raid', send: 'Send', link: 'Link', xrally: 'Rally', xflight: 'Fly queen', xtunnel: 'Tunnel', march: 'March', swarm: 'Swarm raid', look: 'Look', food: 'Food trail', alarm: 'Alarm', avoid: 'Avoid', collect: 'Collect', erase: 'Erase', dig: 'Dig', chamber: 'Chamber', fill: 'Undo' };
+const TOOL_KEYS = { bridge: '4', raid: 'I', send: 'O', link: 'P', xrally: 'Y', xflight: 'L', xtunnel: 'K', march: 'B', swarm: 'Z', look: 'Q', food: 'F', alarm: 'R', avoid: 'V', collect: 'T', erase: 'E', dig: 'G', chamber: 'C', fill: 'X' };
+const TOOL_SWATCH = { bridge: '#d08a4a', raid: '#ff6a4a', send: '#9fd37a', link: '#c99a62', xrally: '#ff9a5a', xflight: '#f6d77a', xtunnel: '#a0744a', march: '#e0a060', swarm: '#d9784a', food: '#f2c14e', alarm: '#ef5a3c', avoid: '#a77be0', collect: '#e8b04a', erase: '#bbb', dig: '#ffb050', chamber: '#f0e6c8', fill: '#999', look: '#e9dcc0' };
 
 // tool icons: small code-drawn SVGs in the tool's colour (24x24 view box, stroked)
 const TOOL_SVG = {
@@ -31,6 +31,7 @@ const TOOL_SVG = {
   link: '<circle cx="5" cy="7" r="2.6"/><circle cx="19" cy="17" r="2.6"/><path d="M7 9c3 6 7 0 10 6" stroke-dasharray="2.2 2"/>',
   xrally: '<path d="M6 21V4"/><path d="M6 4h11l-2.5 4L17 12H6" fill="currentColor" fill-opacity=".35"/>',
   xflight: '<path d="M12 8c-3-5-8-5-9-3 2 4 5 5 9 5 4 0 7-1 9-5-1-2-6-2-9 3z"/><path d="M12 10v8"/><circle cx="12" cy="19.5" r="1.4" fill="currentColor"/>',
+  bridge: '<path d="M2 18c3 0 4 1.5 7 1.5s4-1.5 7-1.5 4 1.5 6 1.5" stroke-opacity=".55"/><path d="M2 13c5-4.5 15-4.5 20 0"/><circle cx="7" cy="10.4" r="1.5" fill="currentColor"/><circle cx="12" cy="9.2" r="1.5" fill="currentColor"/><circle cx="17" cy="10.4" r="1.5" fill="currentColor"/>',
   xtunnel: '<path d="M2 18h20"/><path d="M6 18v-3a6 6 0 0 1 12 0v3"/><path d="M10 18v-2a2 2 0 0 1 4 0v2" fill="currentColor"/>',
 };
 const toolIcon = id => TOOL_SVG[id] ? '<svg class="ti" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:' + TOOL_SWATCH[id] + '">' + TOOL_SVG[id] + '</svg>' : '<i class="sw" style="background:' + TOOL_SWATCH[id] + '"></i>';
@@ -138,6 +139,7 @@ const UI = AL.UI = {
     if (id === 'xtunnel') return !!(c && c.research && c.research.tunnel >= 1);
     if (id === 'xrally') return !!(w && w.exp);
     if (id === 'link') return !!(c && c.mods && c.mods.nestlink);
+    if (id === 'bridge') { const S = w && w.surface; return !!(S && S.terrainCounts && S.terrainCounts[AL.TERRAIN.STREAM] > 0); }   // (maps with water)
     return true;
   },
   toolSig() { return ['xflight', 'xtunnel', 'xrally', 'link'].map(id => UI.toolAvailable(id) ? 1 : 0).join(''); },
@@ -263,7 +265,7 @@ const UI = AL.UI = {
     else if (c === 'F9') { UI.bench(); e.preventDefault(); }
     else if (c === 'Escape') { if (AL.Tools.current) AL.Tools.select(null); else UI.pause(true); }
     else if (c === 'KeyQ') AL.Tools.select(null);
-    else for (const id in TOOL_KEYS) if (id[0] !== 'x' && 'Key' + TOOL_KEYS[id] === c && AL.Tools.TOOLS[id]) { UI.pickTool(id); break; }   // x* tools bind their own keys
+    else for (const id in TOOL_KEYS) if (id[0] !== 'x' && ('Key' + TOOL_KEYS[id] === c || 'Digit' + TOOL_KEYS[id] === c) && AL.Tools.TOOLS[id]) { UI.pickTool(id); break; }   // x* tools bind their own keys
   },
   // click in Look mode: describe what's under the cursor
   click(wx, wy, e) {

@@ -26,7 +26,8 @@ test('every biome and map size builds, with its own ground', () => {
   assert.ok(f[T.LITTER] > 0.4, 'the forest floor is mostly leaf litter');
   assert.ok(d[T.SAND] + d[T.GRAVEL] > 0.8, 'the desert is sand and gravel');
   assert.ok(wl[T.MUD] > 0.12 && wl[T.STREAM] > 0.03, 'the wetland has mud and water');
-  assert.ok(y[T.GRASS] > 0.55 && y[T.STREAM] === 0, 'the backyard is mostly lawn, no streams');
+  assert.ok(y[T.GRASS] > 0.5 && y[T.STREAM] > 0, 'the backyard is mostly lawn, with a stream');
+  assert.ok(Math.abs(AL.TERRAIN_INFO[T.STREAM].speed - 1 / 3) < 1e-9, 'ants swim streams at a third of walking speed');
 });
 
 test('streams never cut anything off: every nest, every find and almost all open ground can be walked to', () => {

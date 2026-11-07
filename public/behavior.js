@@ -328,7 +328,7 @@ function updateSurface(world) {
   const A = world.ants, S = world.surface, T = AL.TUNE, DT = T.DT, R = world.R;
   const X = A.x, Y = A.y, PX = A.px, PY = A.py, ANG = A.a, TURN = A.turn, STATE = A.state, LAYER = A.layer;
   const COL = A.col, CASTE = A.caste, TIMER = A.timer, STR = A.str, WF = A.wf, ANIM = A.anim, HOME = A.home, HOMES = world.homes || world.colonies, NCOL = world.colonies.length;
-  const blocked = S.blocked, gw = S.gw, inv = 1 / S.cell, SW = S.W - 2, SH = S.H - 2, TSP = S.tspeed;   // TSP: terrain walking speed per cell (terrain.js)
+  const blocked = S.blocked, gw = S.gw, inv = 1 / S.cell, SW = S.W - 2, SH = S.H - 2, TSP = S.tspeed, BRG = S.bridgeOwner;   // TSP: terrain walking speed per cell (terrain.js)
   const blk = (px, py) => px < 2 || py < 2 || px > SW || py > SH || blocked[((py * inv) | 0) * gw + ((px * inv) | 0)] === 1;
   const food = world.pher.food, avoidOf = world.pher.avoidOf || [world.pher.avoid];
   const hash = world.hash; hash.clear();
@@ -340,6 +340,7 @@ function updateSurface(world) {
   const LEGS = A.legs, HEADLESS = A.headless, IJ = AL.Injury, IJA = IJ && IJ.mem ? IJ.mem(A).ijA : null, CIRT = AL.INJURY ? AL.INJURY.CIRCLE_TURN : 0;
   const GUT = A.gut, HOME_GUT = AL.HUNGER ? AL.HUNGER.HOME : -1;   // stomachs (hunger.js): cheap check before asking needsToEat
   const n = A.high;
+  const BRS = AL.Bridges, BRN = !!(BRS && world.bridgesWhole > 0 && TSP);   // any finished living bridge to route over
   trailMem(A); scoutMem(A);
   let updated = 0;
   for (let i = 0; i < n; i++) {
@@ -362,7 +363,12 @@ function updateSurface(world) {
     // heat waves slow ants caught in open sun (shade from canopy or shelters cancels it)
     if (sunSlow && !shade[((Y[i] * inv) | 0) * gw + ((X[i] * inv) | 0)]) spd *= 1 - sunSlow;
     if (CARRY[i]) spd *= SLOW;   // hauling anything slows an ant down
-    if (TSP) spd *= TSP[((Y[i] * inv) | 0) * gw + ((X[i] * inv) | 0)] || 1;   // sand and gravel are quick, mud and leaf litter slow
+    if (TSP) {   // sand and gravel are quick, mud and leaf litter slow, streams are swum at a third (on its own
+      // colony's living ant bridge an ant walks at full speed: enemies can't use it, bridges.js)
+      const ci = ((Y[i] * inv) | 0) * gw + ((X[i] * inv) | 0); let k = TSP[ci] || 1;
+      if (BRG && k < 0.5 && BRG[ci] === c + 1) k = 1;
+      spd *= k;
+    }
     const sense = ((i + tick) % 3) === 0;
     // fight injuries (injury.js): lost legs slow it, one side gone sends it round in circles, a headless ant
     // stumbles about blind (its state machine is skipped)
@@ -493,6 +499,8 @@ function updateSurface(world) {
       }
     }
     if (STATE[i] === 0 || LAYER[i] !== 0) continue;
+    // at the water's edge: the colony's own living bridge if one goes its way (bridges.js), else it swims
+    if (BRN && !circ && !blind) { const ta = BRS.steer(world, i); if (ta === ta) TURN[i] = AL.clamp(steerTo(ANG[i], ta, 7), -9, 9); }
     // ---- movement with obstacle bumping ----
     // (an ant with no legs on one side keeps its own heading turning, whatever its state wanted)
     let a = circ ? IJA[i] + circ * CIRT * dt : ANG[i] + TURN[i] * dt;

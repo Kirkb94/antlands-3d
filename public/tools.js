@@ -88,6 +88,27 @@ TOOLS.swarm = { id: 'swarm', layer: 'surface', name: 'Swarm raid', key: 'KeyZ', 
     });
     AL.Tools.select(null);
   } };
+// Bridge: press on one bank, drag across the stream, let go on the far bank. Workers (one per few units of water) walk
+// out and lock together into a living bridge (bridges.js). The line being dragged is UI only (drawn by bridges.js).
+let bdrag = null;
+TOOLS.bridge = { id: 'bridge', layer: 'surface', name: 'Bridge', key: 'Digit4', tip: 'Press on one bank and drag across the water to the other. Workers leave the nest and lock their legs together into a living bridge your ants can cross at full speed (the wider the water, the more workers it takes). They stay on it until enemies kill them, and never fight back. Without a bridge ants swim, at a third of their speed. Drag over a damaged bridge to patch it.',
+  paint(phase, x, y) {
+    const w = G.world; if (!w) return;
+    if (phase === 'start') { bdrag = { x0: x, y0: y, x1: x, y1: y }; stroke = { id: 'bridge' }; return; }
+    if (!bdrag) return;
+    if (phase === 'move') { bdrag.x1 = x; bdrag.y1 = y; return; }
+    const d = bdrag; bdrag = null; stroke = null;
+    if (phase !== 'end') return;   // (Esc: no bridge)
+    d.x1 = x; d.y1 = y;
+    const toast = (m, k) => { if (AL.UI && AL.UI.toast) AL.UI.toast(m, k); };
+    if (Math.hypot(d.x1 - d.x0, d.y1 - d.y0) < 12) { toast('Press on one bank and drag across the water to the far bank.'); return; }
+    const r1 = v => Math.round(v * 10) / 10;
+    AL.Cmd.issue('bridge', { x0: r1(d.x0), y0: r1(d.y0), x1: r1(d.x1), y1: r1(d.y1) }, r => {
+      if (!r) return;
+      if (!r.ok) { if (r.why) toast(r.why); return; }
+      toast(r.patch ? r.need + (r.need === 1 ? ' worker heads' : ' workers head') + ' out to patch the bridge.' : r.need + ' workers head out to lock together across the water.', 'good');
+    });
+  } };
 brush('avoid', { name: 'Avoid', key: 'KeyV', tip: 'Mark danger. Your ants steer around it.' });
 brush('erase', { name: 'Erase', key: 'KeyE', tip: 'Wipe your trails under the brush.' });
 
@@ -103,7 +124,7 @@ tileBrush('fill', { name: 'Undo', key: 'KeyX', color: 'rgba(200,200,200,0.8)', t
 
 AL.Tools = {
   chamberType: 2, collectN: 10,
-  collectCircle: () => circle, foodsIn,
+  collectCircle: () => circle, foodsIn, bridgeDrag: () => bdrag,
   TOOLS, brush,
   init(game) { G = game; },
   get current() { return cur; },
