@@ -437,10 +437,78 @@ R3.showcase = function (r3, world, cx, cy, L, t) {
   lab(cx + 140, y + 40, 'Larvae'); lab(cx - 200, y4 + 48, 'Aphid plant (honeydew)'); lab(cx - 30, y4 + 40, 'Seeds'); lab(cx + 130, y4 + 40, 'Clover');
   Y.water.end(); Y.clips.end(); Y.bwing.end();
 };
+// ---- living ant bridge: ants locked leg-to-leg in 3 lanes across the water, sagging a little in the middle -------
+// build 0..1: the chain grows out from both banks and meets in the middle; walkers: ants crossing on top
+const BR = { lanes: [-4.2, 0, 4.2] };
+function antBridge(r3, pal, x0, y0, x1, y1, build, t, walkers, wpal) {
+  const dx = x1 - x0, dy = y1 - y0, L = Math.hypot(dx, dy), ux = dx / L, uy = dy / L, nx = -uy, ny = ux, step = 6.2;
+  const n = Math.max(2, Math.floor(L / step)), half = build * 0.5, a = Math.atan2(dy, dx), g0 = r3.T(x0, y0);
+  const fr = (r3.r.frame >> 2);
+  const hAt = u => g0 + 2.6 - Math.sin(PI * u) * 1.6;   // the chain sags under its own weight
+  for (let li = 0; li < BR.lanes.length; li++) {
+    const off = BR.lanes[li];
+    for (let k = 0; k <= n; k++) {
+      const u = k / n;
+      if (u > half && u < 1 - half) continue;                              // not built yet
+      const sway = Math.sin(t * 2 + k * 0.7 + li) * 0.35, x = x0 + ux * u * L + nx * (off + sway), y = y0 + uy * u * L + ny * (off + sway);
+      const hd = a + ((k + li) & 1 ? PI : 0) + Math.sin(k * 1.3 + li) * 0.25; // alternate ants face opposite ways, legs hooked
+      pal.group.put(x, hAt(u) + (li === 1 ? 0.5 : 0), y, Math.cos(hd), Math.sin(hd), 1, (k + li) % 3, pal);   // (still: legs hooked into the next ant)
+    }
+  }
+  // the building fronts: fresh ants scrambling out along the chain to lock on
+  if (build < 1) for (const side of [0, 1]) for (let k = 0; k < 3; k++) {
+    const u0 = side ? 1 - half : half, dir = side ? 1 : -1, ph = (t * 0.6 + k / 3) % 1, u = u0 + dir * (1 - ph) * 0.25;
+    if (u < 0 || u > 1) continue;
+    const x = x0 + ux * u * L + nx * BR.lanes[k], y = y0 + uy * u * L + ny * BR.lanes[k], hd = a + (side ? PI : 0);
+    pal.group.put(x, hAt(u) + 3, y, Math.cos(hd), Math.sin(hd), 1, FR[(fr + k) & 3], pal);
+  }
+  // traffic across the finished bridge, both ways, walking on the backs of the bridge ants
+  if (build >= 1) for (let k = 0; k < walkers; k++) {
+    const back = k & 1, u = ((t * 0.12 + k / walkers) % 1), uu = back ? 1 - u : u, side = back ? -1.8 : 1.8;
+    const x = x0 + ux * uu * L + nx * side, y = y0 + uy * uu * L + ny * side, hd = a + (back ? PI : 0);
+    (wpal || pal).group.put(x, hAt(uu) + 3.6, y, Math.cos(hd), Math.sin(hd), 1, FR[((t * 10) | 0) + k & 3], wpal || pal);
+  }
+}
+R3.bridgePreview = function (r3, world, cx, cy, L, t) {
+  const c = world.colonies[world.me || 0], myBody = c && (c.colours || c.sp).body;
+  void myBody; BR.foe = BR.foe || { sp: AL.SPECIES.carpenter || c.sp, colours: { body: '#26242a', head: '#141316', gaster: '#2e2b33', look: 'carpenter' } };
+  const foe = BR.foe;
+  if (!c) return;
+  if (!BR.water) {
+    BR.water = new THREE.Mesh(new THREE.PlaneGeometry(1, 1).rotateX(-PI / 2), new THREE.MeshStandardMaterial({ color: 0x3f7fb0, roughness: 0.15, metalness: 0.1, transparent: true, opacity: 0.88 }));
+    BR.water.receiveShadow = true; r3.scene.add(BR.water);
+    BR.banks = [0, 1].map(() => { const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshStandardMaterial({ color: 0x6b5236, roughness: 1 })); m.receiveShadow = true; r3.scene.add(m); return m; });
+  }
+  BR.water.visible = true; for (const b of BR.banks) b.visible = true;
+  const W = 54, g = r3.T(cx, cy);
+  BR.water.position.set(cx, g + 0.4, cy); BR.water.scale.set(560, 1, W);
+  BR.banks.forEach((b, i) => { b.position.set(cx, g - 0.2, cy + (i ? 1 : -1) * (W / 2 + 2)); b.scale.set(560, 1.6, 6); });
+  const pal = palOf(r3, c.colours || c.sp, C.WORKER), fpal = palOf(r3, foe.colours || foe.sp, C.WORKER), fsol = palOf(r3, foe.colours || foe.sp, C.SOLDIER);
+  const y0 = cy - W / 2 - 4, y1 = cy + W / 2 + 4, xs = [cx - 168, cx - 56, cx + 56, cx + 168];
+  // the current: glints drifting downstream
+  for (let k = 0; k < 60; k++) {
+    const h = AL.hash2(k, 1, 5), h2 = AL.hash2(k, 2, 5), x = cx - 280 + ((h * 560 + t * (26 + h2 * 18)) % 560), y = cy - W / 2 + 4 + h2 * (W - 8);
+    r3.cWing.put(x, g + 0.9, y, 0, 5 + h * 7, 0.05, 0.5 + h2 * 0.5, K.wing);
+  }
+  antBridge(r3, pal, xs[0], y0, xs[0], y1, 0.3, t, 0); L.push({ x: xs[0], y: y1 + 22, text: 'Building: 30%' });
+  antBridge(r3, pal, xs[1], y0, xs[1], y1, 0.7, t, 0); L.push({ x: xs[1], y: y1 + 22, text: 'Building: 70%' });
+  antBridge(r3, pal, xs[2], y0, xs[2], y1, 1, t, 8); L.push({ x: xs[2], y: y1 + 22, text: 'Living bridge: ants cross' });
+  antBridge(r3, pal, xs[3], y0, xs[3], y1, 1, t, 0); L.push({ x: xs[3], y: y1 + 22, text: 'Under attack' });
+  // enemies bite at the far end of the last bridge but can't get on; the bridge ants hold on and don't fight back
+  for (let k = 0; k < 5; k++) {
+    const ang = -PI / 2 + (k - 2) * 0.45, r = 12 + (k & 1) * 4, x = xs[3] + Math.cos(ang) * r * 0.9, y = y1 + 8 + Math.sin(-ang) * r * 0.6, hd = Math.atan2(y1 - y, xs[3] - x) + Math.sin(t * 9 + k) * 0.15;
+    (k === 2 ? fsol : fpal).group.put(x, r3.T(x, y), y, Math.cos(hd), Math.sin(hd), k === 2 ? AL.CASTES[C.SOLDIER].size : 1, FR[((t * 12) | 0) + k & 3], k === 2 ? fsol : fpal);
+  }
+  // the colony's own ants lining up on the near bank to cross
+  for (let k = 0; k < 4; k++) { const x = xs[2] + (k - 1.5) * 4, y = y0 - 10 - k * 7; pal.group.put(x, r3.T(x, y), y, 0, 1, 1, FR[((t * 10) | 0) + k & 3], pal); }
+  L.push({ x: cx, y: cy - W / 2 - 40, text: 'Stream: swim at 1/3 speed, or cross on a living ant bridge' });
+};
+R3.bridgeHide = () => { if (BR.water) { BR.water.visible = false; for (const b of BR.banks) b.visible = false; } };
 // out of the gallery: the showcase pieces go away and the mower is full size again
 const baseUpdate = Yard.update;
 Yard.update = function (r3, world, v, t) {
   if (SC.meshes && R3.gallery !== 4) for (const m of Object.values(SC.meshes)) m.visible = false;
+  if (R3.gallery !== 5) R3.bridgeHide();
   this.mower.scale.setScalar(1);
   if (R3.gallery === 4) { this.water.begin(); this.clips.begin(); this.bwing.begin(); for (const s of this.shoes) s.visible = false; this.robin.visible = false; this.mower.visible = false; return; }
   return baseUpdate.call(this, r3, world, v, t);

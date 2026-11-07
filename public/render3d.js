@@ -1028,6 +1028,12 @@ class R3D {
       (pg === 0 ? live : dead).forEach(([name, fn], i) => { const [x, y] = at(i, 5, 52, 84, 2); this.frame(x, y, spin + i, 1.1); fn(); L.push({ x, y: y + 30, text: name }); });
       return;
     }
+    if (pg === 5 && AL.R3D.bridgePreview) {   // ant bridges (render3d-yard.js), a stream off to the side of your mound
+      const sx = p.x + 330, sy = p.y + 20;
+      r.cam.x = sx; r.cam.y = sy; r.cam.z = 3.1;
+      AL.R3D.bridgePreview(this, world, sx, sy, L, t);
+      return;
+    }
     if (pg === 4 && AL.R3D.showcase) {   // the yard models (render3d-yard.js), off to the side of your mound
       const sx = p.x + 360, sy = p.y;
       r.cam.x = sx; r.cam.y = sy; r.cam.z = 1.15;
@@ -1223,7 +1229,7 @@ P.drawSurface = function (ctx, cam, alpha, opacity) {
   this.layer('grade', ctx, view);
   if (this.showTrails) this.drawTrailGlow(ctx, S);
   this.drawOrders(ctx, view);
-  if (world.fog && AL.R3D.gallery !== 4) this.drawFog(ctx, view);   // (the yard showcase is in the clear)
+  if (world.fog && AL.R3D.gallery !== 4 && AL.R3D.gallery !== 5) this.drawFog(ctx, view);   // (the yard showcase is in the clear)
   this.layer('fog', ctx, view);
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   if (this.drawBars) this.drawBars(ctx, view);
@@ -1267,8 +1273,8 @@ window.addEventListener('keydown', e => {
   if (e.key === 'F8' || e.key === '\\' || e.code === 'Backslash') {   // 3D model gallery: creatures -> carcasses -> ants -> off
     e.preventDefault();
     const g = AL.R3D.gallery;
-    AL.R3D.gallery = g == null ? 0 : g < 4 ? g + 1 : null;
-    if (AL.UI && AL.UI.toast) AL.UI.toast(AL.R3D.gallery == null ? '3D gallery off [F8]' : '3D gallery: ' + ['creatures', 'carcasses', 'ants', 'species', 'yard'][AL.R3D.gallery] + ' [F8]');
+    AL.R3D.gallery = g == null ? 0 : g < 5 ? g + 1 : null;
+    if (AL.UI && AL.UI.toast) AL.UI.toast(AL.R3D.gallery == null ? '3D gallery off [F8]' : '3D gallery: ' + ['creatures', 'carcasses', 'ants', 'species', 'yard', 'ant bridges'][AL.R3D.gallery] + ' [F8]');
     return;
   }
   if (e.key !== 'F7') return;
