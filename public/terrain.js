@@ -123,36 +123,26 @@ function finish(S) {
   S.tfadeK = INFO[T.SAND].fade;
   S.terrainCounts = INFO.map((_, k) => 0); for (const t of ter) S.terrainCounts[t]++;
 }
-// every bit of open ground must be reachable from the nests: little pockets cut off by streams fill in as water,
-// bigger ones (or any with food or a creature's home in them) get a twig bridge over the shortest crossing
+// tidy up ground the nests can't reach: little empty pockets walled in by rocks, logs and trees are closed off.
+// Water never cuts anything off (streams are swimmable), so there are no twig bridges: a colony bridges a stream
+// with its own ants (bridges.js).
 function connect(S, starts, pois) {
-  const gw = S.gw, gh = S.gh, n = gw * gh, ter = S.terrain, blk = S.blocked, cell = S.cell;
+  const gw = S.gw, gh = S.gh, n = gw * gh, blk = S.blocked, cell = S.cell;
   const cellOf = (x, y) => Math.max(0, Math.min(gh - 1, (y / cell) | 0)) * gw + Math.max(0, Math.min(gw - 1, (x / cell) | 0));
   const want = new Uint8Array(n); for (const p of pois) want[cellOf(p.x, p.y)] = 1; for (const f of S.foods || []) want[cellOf(f.x, f.y)] = 1; for (const s0 of starts) want[cellOf(s0.x, s0.y)] = 1;
-  const seen = new Uint8Array(n), comp = new Int32Array(n), q = new Int32Array(n), par = new Int32Array(n);
+  const seen = new Uint8Array(n), comp = new Int32Array(n), q = new Int32Array(n);
   const nb = (i, f) => { const gx = i % gw, gy = (i / gw) | 0; if (gx > 0) f(i - 1); if (gx < gw - 1) f(i + 1); if (gy > 0) f(i - gw); if (gy < gh - 1) f(i + gw); };
-  for (let pass = 0; pass < 60; pass++) {
-    seen.fill(0); let h = 0, t = 0;
+  {
+    let h = 0, t = 0;
     { const i = cellOf(starts[0].x, starts[0].y); seen[i] = 1; q[t++] = i; }   // (from one nest: the others must be reachable from it)
     while (h < t) { const i = q[h++]; nb(i, j => { if (!seen[j] && !blk[j]) { seen[j] = 1; q[t++] = j; } }); }
-    // the cut-off pockets (open, not reached): tiny empty ones become water
-    let left = 0; comp.fill(-1);
+    // the cut-off pockets (open, not reached): tiny empty ones are closed off
+    comp.fill(-1);
     for (let i0 = 0; i0 < n; i0++) {
       if (seen[i0] || blk[i0] || comp[i0] >= 0) continue;
       let ch = 0, ct = 0, has = 0; q[ct++] = i0; comp[i0] = i0;
       while (ch < ct) { const i = q[ch++]; if (want[i]) has = 1; nb(i, j => { if (comp[j] < 0 && !blk[j] && !seen[j]) { comp[j] = i0; q[ct++] = j; } }); }
-      if (!has && ct < 25) { for (let k = 0; k < ct; k++) { ter[q[k]] = T.STREAM; blk[q[k]] = 1; } } else left++;
-    }
-    if (!left) return;
-    // the shortest way over the water from the reached ground to any pocket: those stream cells become a bridge
-    h = 0; t = 0; par.fill(-1);
-    for (let i = 0; i < n; i++) if (seen[i]) q[t++] = i;
-    let hit = -1;
-    while (h < t && hit < 0) { const i = q[h++]; nb(i, j => { if (hit >= 0 || seen[j]) return; if (ter[j] === T.STREAM) { seen[j] = 1; par[j] = i; q[t++] = j; } else if (!blk[j]) { hit = i; } }); }
-    if (hit < 0) return;
-    for (let i = hit; i >= 0 && ter[i] === T.STREAM; i = par[i]) {
-      // two cells wide, so the crossing is easy to see and to walk
-      for (const j of [i, (i % gw) < gw - 1 ? i + 1 : i - 1]) if (ter[j] === T.STREAM) { ter[j] = T.BRIDGE; blk[j] = 0; }
+      if (!has && ct < 25) for (let k = 0; k < ct; k++) blk[q[k]] = 1;
     }
   }
 }

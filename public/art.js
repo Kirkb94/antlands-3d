@@ -300,7 +300,7 @@ function paintTerrain(S, x, seed, R) {
   // twig bridges: one bundle of twigs per bridge patch, laid across the stream (the shortest way over the water)
   const seenB = new Uint8Array(gw * gh), isW = (gx, gy) => gx >= 0 && gy >= 0 && gx < gw && gy < gh && water(ter[gy * gw + gx]);
   for (let i0 = 0; i0 < gw * gh; i0++) {
-    if (ter[i0] !== T.BRIDGE || seenB[i0]) continue;
+    if (ter[i0] !== T.BRIDGE || seenB[i0]) continue;   // (never any now: no twig bridges, terrain.js; kept for old saves)
     const q = [i0]; seenB[i0] = 1; let sx2 = 0, sy2 = 0, n = 0;
     while (q.length) { const i = q.pop(), gx = i % gw, gy = (i / gw) | 0; sx2 += gx; sy2 += gy; n++;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nx = gx + dx, ny = gy + dy, j = ny * gw + nx; if (nx >= 0 && ny >= 0 && nx < gw && ny < gh && !seenB[j] && ter[j] === T.BRIDGE) { seenB[j] = 1; q.push(j); } } }
