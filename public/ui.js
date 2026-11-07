@@ -72,6 +72,7 @@ function casteIcon(caste, size) {
   const cv = document.createElement('canvas'); cv.width = cv.height = size * 2; cv.className = 'icon';
   cv.style.width = cv.style.height = size + 'px';
   const draw = () => {
+    if (UI.icon3d && UI.icon3d(cv, caste)) return;   // the 3D ant model (icons3d.js), else the 2D sprite
     const r = G.renderer; if (!r.atlas) return;
     const sp = r.atlas[0].hi[caste], x = cv.getContext('2d'), k = (size * 2 * 0.95) / sp.cs * (caste === C.QUEEN || caste === C.MAJOR ? 1.45 : 1.9);   // polish: fill the icon (easier to spot)
     x.clearRect(0, 0, cv.width, cv.height);

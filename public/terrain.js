@@ -87,14 +87,38 @@ function folder(world) {
     return [r * AL.cos(f), r * AL.sin(f)];
   };
 }
-const STREAM_W = 0.022;   // half-width of a stream's noise band (about 3 cells across)
+const STREAM_W = 0.022;   // (old noise-band streams; kept for anything that still reads it)
+// Streams: a few long meandering rivers that run right across the map from one edge to the other, splitting it into
+// parts (with the food in them). Each is a band round a straight line at a random angle and offset, bent by noise along
+// its length. They never run over a nest: a band that would comes out somewhere else. In a fair map's folded
+// coordinates, so every colony gets the same rivers round it. -> [{ nx, ny, off, amp, w, ph }]
+function streamPlan(seed, B, ext, avoid) {
+  if (!B.streams) return [];
+  const h = k => AL.hash2(seed | 0, k, 909), n = Math.max(1, Math.round(B.streams * 2 + h(1) * 0.9 - 0.2)), out = [];
+  for (let s = 0; s < n; s++) {
+    let band = null;
+    for (let tryN = 0; tryN < 24 && !band; tryN++) {
+      const k = 10 + s * 50 + tryN * 2, a = h(k) * Math.PI, nx = Math.cos(a), ny = Math.sin(a);
+      const b = { nx, ny, off: (h(k + 1) - 0.5) * ext * 0.9, amp: 90 + h(k + 2) * 160, w: 14 + h(k + 3) * 10 * B.streams, ph: h(k + 4) * 50 };
+      if ((avoid || []).every(p => Math.abs(across(b, p[0], p[1], seed)) > b.w + 170) && out.every(o => Math.abs(o.nx * nx + o.ny * ny) < 0.95 || Math.abs(o.off - b.off) > 400)) band = b;
+    }
+    if (band) out.push(band);
+  }
+  return out;
+}
+function across(b, u, v, seed) {
+  const along = -u * b.ny + v * b.nx;
+  return u * b.nx + v * b.ny - b.off - b.amp * (AL.fbm(along / 520 + b.ph, b.ph * 0.37, (seed | 0) + 606, 2) - 0.5) * 2;
+}
+const inStream = (bands, u, v, seed) => { for (const b of bands) if (Math.abs(across(b, u, v, seed)) < b.w) return true; return false; };
 function generate(world) {
   const S = world.surface, B = biomeOf(world), seed = world.seed | 0, gw = S.gw, gh = S.gh, cell = S.cell;
   const ter = S.terrain = new Uint8Array(gw * gh), fold = folder(world);
   const flat = !!(world.opts && world.opts.flatGround);   // (all grass: tests of plain movement and fights)
   const pois = S.pois.filter(p => !p.gone), nests = S.nestSites || [];
   const nearAny = (x, y, list, r) => { for (const p of list) if ((p.x - x) * (p.x - x) + (p.y - y) * (p.y - y) < r * r) return true; return false; };
-  const keepClear = (x, y) => nearAny(x, y, nests, 330) || nearAny(x, y, pois, 110) || (AL.sq(x - S.W / 2) + AL.sq(y - S.H / 2) < 260 * 260);
+  const keepClear = (x, y) => nearAny(x, y, nests, 150) || nearAny(x, y, pois, 45);   // (food stays on dry ground: a little island if a river runs through it)
+  const bands = flat ? [] : streamPlan(seed, B, Math.min(S.W, S.H), nests.map(p => fold(p.x, p.y)));
   for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
     const x = (gx + 0.5) * cell, y = (gy + 0.5) * cell, i = gy * gw + gx;
     if (S.blocked[i]) { ter[i] = T.GRASS; continue; }
@@ -103,12 +127,8 @@ function generate(world) {
     let t = flat ? T.GRASS : B.pick(a, b, c);
     // round each nest the ground is worn to plain earth/grass: nobody starts on a swamp or a sand dune
     if (nearAny(x, y, nests, 120)) t = T.GRASS;
-    // streams: a thin meandering band of a large-scale noise field, kept off nests, food and the middle; twig bridges
-    // where another field is high
-    if (B.streams && !flat) {
-      const s = AL.fbm(u / 980 - 1.7, v / 980 + 6.1, seed + 404, 3);
-      if (Math.abs(s - 0.5) < STREAM_W * B.streams && !keepClear(x, y)) t = T.STREAM;   // (swimmable: no twig bridges, ants build living ones)
-    }
+    // streams: rivers right across the map (swimmable at a third of the speed; colonies bridge them with their own ants)
+    if (bands.length && inStream(bands, u, v, seed) && !keepClear(x, y)) t = T.STREAM;
     ter[i] = t;
   }
   if (!flat) connect(S, nests.length ? nests : [{ x: S.W / 2, y: S.H / 2 }], pois);
@@ -198,6 +218,6 @@ AL.registerSystem({
     }
   },
 });
-AL.Terrain = { STREAM_W, T, INFO, BIOMES, generate, at, mudShare, preyMul, biomeOf, folder };
+AL.Terrain = { STREAM_W, streamPlan, inStream, T, INFO, BIOMES, generate, at, mudShare, preyMul, biomeOf, folder };
 if (NODE) module.exports = AL.Terrain;
 })(typeof window !== 'undefined' ? window : globalThis);
