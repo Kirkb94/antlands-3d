@@ -240,7 +240,7 @@ test('8 Two Fronts: six colonies; garrisons on the key points fill the hold mete
   const pts = w.victory.points; assert.ok(pts.length >= 3);
   const garrison = () => { for (const p of pts) { for (let k = 0; k < 25; k++) { const a = k / 25 * AL.TAU, i = w.ants.spawn(0, C.SOLDIER, L.SURFACE, p.x + Math.cos(a) * p.r * 0.4, p.y + Math.sin(a) * p.r * 0.4, a, w.R); w.ants.state[i] = ST.X_GARRISON; w.ants.tx[i] = p.x; w.ants.ty[i] = p.y; w.ants.str[i] = p.r * 0.5; w.ants.timer[i] = 9999; } } };
   let peak = 0;
-  const r = play(w, 600, (ww, s) => { if (s === 85 || s === 170) garrison(); peak = Math.max(peak, goal(w, 'hold').v); });
+  const r = play(w, 600, (ww, s) => { if (s >= 85 && s % 85 === 0) garrison();   // (keep the garrisons topped up: rival colonies contest the points) peak = Math.max(peak, goal(w, 'hold').v); });
   won(r, 'fronts');
   assert.ok(peak >= 90, 'hold meter reported ' + peak + '%');
   assert.ok(r.bonus[1], 'owned every point');

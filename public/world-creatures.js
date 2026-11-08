@@ -100,13 +100,45 @@ function steer(world, cr, tx, ty, spd, dt, free) {
   const want = AL.atan2(dy, dx), turn = AL.wrap(want - cr.a), maxT = (free ? 6 : 3.2) * dt;
   cr.a = AL.wrap(cr.a + AL.clamp(turn, -maxT, maxT));
   const step = Math.min(d, spd * dt), S = world.surface;
+  let moved = false;
   for (let k = 0; k < 5; k++) {
     const a = cr.a + (k === 0 ? 0 : (k & 1 ? 1 : -1) * 0.7 * ((k + 1) >> 1));
     const nx = cr.x + AL.cos(a) * step, ny = cr.y + AL.sin(a) * step;
-    if (free || !AL.Surface.isBlocked(S, nx, ny)) { cr.x = AL.clamp(nx, 4, S.W - 4); cr.y = AL.clamp(ny, 4, S.H - 4); if (k) cr.a = a; break; }
+    // (one already standing on a rock or a log, pushed there in a fight or born under it, may always crawl off it)
+    if (free || !AL.Surface.isBlocked(S, nx, ny) || AL.Surface.isBlocked(S, cr.x, cr.y)) { cr.x = AL.clamp(nx, 4, S.W - 4); cr.y = AL.clamp(ny, 4, S.H - 4); if (k) cr.a = a; moved = true; break; }
+  }
+  // boxed in (a hollow in a rock or a log across the way): follow the wall round, always keeping it on the same
+  // side, turning back toward the goal each step as above (the old 5 tries left creatures standing at the wall)
+  if (!moved) {
+    const side = cr.wside || ((cr.slot & 1) ? 1 : -1);
+    for (let j = 1; j <= 9 && !moved; j++) {
+      const a = cr.a + side * j * 0.35, nx = cr.x + AL.cos(a) * step, ny = cr.y + AL.sin(a) * step;
+      if (!AL.Surface.isBlocked(S, nx, ny)) { cr.x = AL.clamp(nx, 4, S.W - 4); cr.y = AL.clamp(ny, 4, S.H - 4); cr.a = a; moved = true; }
+    }
+    cr.wside = moved ? side : -side;
   }
   cr.anim += step * 0.25;
   return d - step;
+}
+// back to its home: a lair or a nook under a log or a rock can be inside a blocked cell, so the last stretch crawls
+// in under it (a creature used to stop at the edge and stand there for good). Returns the distance left.
+function goHome(world, cr, spd, dt) {
+  const hx = cr.home.x, hy = cr.home.y, near = dist2(cr, hx, hy) < 50 * 50;
+  return steer(world, cr, hx, hy, spd, dt, near && AL.Surface.isBlocked(world.surface, hx, hy));
+}
+// a quick look round for an ant to hunt, from (x, y): the nearest walking ant within range with only a few others
+// close by (-1: none)
+function loneAnt(world, x, y, range, crowdMax) {
+  const A = world.ants, n = W().antsIn(world, x, y, range, BUF);
+  let best = -1, bd = 1e18;
+  for (let k = 0; k < n; k++) {
+    const i = BUF[k], st = A.state[i];
+    if (st !== ST.WANDER && st !== ST.RETURN && st !== ST.HOMING) continue;
+    if (A.caste[i] === CA.QUEEN || A.caste[i] === CA.WINGED) continue;
+    const dd = (A.x[i] - x) * (A.x[i] - x) + (A.y[i] - y) * (A.y[i] - y); if (dd < bd) { bd = dd; best = i; }
+  }
+  if (best < 0) return -1;
+  return W().antsIn(world, A.x[best], A.y[best], 40, BUF) <= crowdMax ? best : -1;
 }
 const dist2 = (cr, x, y) => (cr.x - x) * (cr.x - x) + (cr.y - y) * (cr.y - y);
 function antValid(A, i, uid) { return i >= 0 && A.state[i] && A.uid[i] === uid && A.layer[i] === 0; }
@@ -200,14 +232,32 @@ function fightBack(world, cr, dt, mul) {
 
 // ---- behaviours ----------------------------------------------------------------------------------
 const SPIDER_GRACE = 360;   // s
+// Wolf spider (Lycosidae): by day she waits at the mouth of her lair and ambushes ants that pass; at night a hungry
+// one prowls a loop round it. She closes in low and steady, heading where the ant is going, crouches for a moment,
+// then makes one short dash: a wolf spider sprints, she doesn't run anything down, so a dash that misses ends the hunt
+// and she rests before trying again. Badly hurt, she breaks off and backs into her lair to heal.
+const SPIDER = { DASH: 46, DASH_T: 1.6, REST: 5, CREEP: 1.3, CROUCH: 0.3, PROWL: [80, 190], PROWL_HUNGER: 0.35, HURT: 0.25 };
+function spiderHurt(cr) { return (cr.attackers >= 4 && cr.hp < cr.maxHp * 0.45) || (cr.attackers >= 1 && cr.hp < cr.maxHp * SPIDER.HURT); }
 function spider(world, cr, dt) {
   const A = world.ants, d = cr.def, e = world.env, nm = AL.World.nightMod('spider', e.night, cr.nm), slow = slowOf(cr);
   if (e.winter && cr.state !== 'hide') { cr.state = 'return'; cr.wintering = true; }
+  if (cr.rest > 0) cr.rest -= dt;
   switch (cr.state) {
+    case 'prowl': {   // a night walk round the lair, looking for ants
+      fightBack(world, cr, dt, nm.dps);
+      if (cr.attackers > 0 || e.night < 0.35) { cr.state = 'return'; break; }
+      if (steer(world, cr, cr.tx, cr.ty, d.speed * 0.55 * nm.speed * slow, dt) < 6) { cr.state = 'return'; break; }
+      if (((world.tick + cr.slot) % 6) === 0 && !(cr.rest > 0) && (world.t >= (AL.WorldCreatures.TUNE_GRACE != null ? AL.WorldCreatures.TUNE_GRACE : SPIDER_GRACE) || (world.opts && world.opts.campaign))) {
+        const drive = AL.Eco ? AL.clamp(1 - cr.food, 0, 1) : 0.5;
+        const i = loneAnt(world, cr.x, cr.y, d.sense * 0.8 * nm.vis * (cr.scale || 1), 2 + Math.round(drive * 3));
+        if (i >= 0) { cr.victim = i; cr.victimUid = A.uid[i]; cr.state = 'stalk'; cr.crouch = 0; cr.dash = 0; AL.emit(world, 'spiderHunt', { x: cr.x, y: cr.y, col: A.col[i] }); }
+      }
+      break;
+    }
     case 'idle': case 'lurk': {
       cr.state = 'lurk';
       if (cr.hp < cr.maxHp && cr.attackers === 0) cr.hp = Math.min(cr.maxHp, cr.hp + 1.5 * dt);
-      if (((world.tick + cr.slot) % 6) === 0) {
+      if (((world.tick + cr.slot) % 6) === 0 && !(cr.rest > 0)) {
         const EC = AL.Eco, hungry = EC && cr.food < EC.TUNE.HUNGRY, drive = EC ? AL.clamp(1 - cr.food, 0, 1) : 0.5;
         if (hungry && EC.spiderHunt(world, cr)) break;   // a hungry spider takes a ladybug or a caterpillar too (eco.js)
         if (EC && cr.food > 0.85) break;   // just fed: she sits in her lair (the hunger meter decides how hard she hunts)
@@ -225,8 +275,10 @@ function spider(world, cr, dt) {
         // only hunts ants walking alone: a crowd keeps it in its lair
         if (best >= 0) {
           const crowd = W().antsIn(world, A.x[best], A.y[best], 40, BUF);
-          if (crowd <= 2 + Math.round(drive * 3)) { cr.victim = best; cr.victimUid = A.uid[best]; cr.state = 'stalk'; AL.emit(world, 'spiderHunt', { x: cr.x, y: cr.y, col: A.col[best] }); }   // (the hungrier, the bolder)
-        }
+          if (crowd <= 2 + Math.round(drive * 3)) { cr.victim = best; cr.victimUid = A.uid[best]; cr.state = 'stalk'; cr.crouch = 0; cr.dash = 0; AL.emit(world, 'spiderHunt', { x: cr.x, y: cr.y, col: A.col[best] }); }   // (the hungrier, the bolder)
+          // nothing to ambush: a hungry spider goes prowling once it's dark
+          else if (e.night > 0.5 && drive > SPIDER.PROWL_HUNGER && AL.hash2(world.tick, cr.slot, 77) < 0.08) prowlFrom(world, cr);
+        } else if (e.night > 0.5 && drive > SPIDER.PROWL_HUNGER && AL.hash2(world.tick, cr.slot, 77) < 0.08) prowlFrom(world, cr);
       }
       fightBack(world, cr, dt, nm.dps);
       break;
@@ -235,10 +287,24 @@ function spider(world, cr, dt) {
       const i = cr.victim;
       if (!antValid(A, i, cr.victimUid) || dist2(cr, cr.home.x, cr.home.y) > (d.sense * 2.4) * (d.sense * 2.4)) { cr.state = 'return'; break; }
       const dd = Math.sqrt(dist2(cr, A.x[i], A.y[i]));
-      const spd = (dd < 42 ? d.lunge : d.speed) * nm.speed * slow;
-      steer(world, cr, A.x[i], A.y[i], spd, dt);
-      if (dd < cr.r + 7) { grab(world, cr, i); cr.state = 'bite'; cr.biteT = 0.25; }
+      let spd, gx = A.x[i], gy = A.y[i];
+      if (dd < SPIDER.DASH || cr.dash > 0) {   // the dash: fast, and short
+        if (!(cr.dash > 0) && !(cr.crouch > 0) && cr.crouch !== -1) { cr.crouch = SPIDER.CROUCH; }   // a moment's crouch first
+        if (cr.crouch > 0) { cr.crouch -= dt; spd = 0; if (cr.crouch <= 0) cr.crouch = -1; }
+        else {
+          cr.dash = (cr.dash || 0) + dt; spd = d.lunge;
+          if (cr.dash > SPIDER.DASH_T) { cr.dash = 0; cr.crouch = 0; cr.rest = SPIDER.REST; cr.victim = -1; cr.state = 'return'; break; }
+        }
+      } else {   // closing in: low and steady, heading where the ant is going rather than where it is
+        const lead = AL.clamp(dd / d.lunge, 0.2, 1.2), v = 30 * (A.state[i] === ST.WANDER || A.state[i] === ST.RETURN || A.state[i] === ST.HOMING ? 1 : 0);
+        gx = A.x[i] + AL.cos(A.a[i]) * v * lead; gy = A.y[i] + AL.sin(A.a[i]) * v * lead;
+        spd = d.speed * SPIDER.CREEP; if (cr.crouch > 0) cr.crouch = 0;
+      }
+      if (spd === 0) cr.a = AL.wrap(cr.a + AL.clamp(AL.wrap(AL.atan2(A.y[i] - cr.y, A.x[i] - cr.x) - cr.a), -4 * dt, 4 * dt));   // (crouched, eyes on it)
+      if (spd > 0) steer(world, cr, gx, gy, spd * nm.speed * slow, dt);
+      if (dd < cr.r + 7) { grab(world, cr, i); cr.state = 'bite'; cr.biteT = 0.25; cr.dash = 0; cr.crouch = 0; }
       fightBack(world, cr, dt, nm.dps);
+      if (spiderHurt(cr)) cr.state = 'flee';
       break;
     }
     case 'bite': {
@@ -254,18 +320,20 @@ function spider(world, cr, dt) {
         cr.biteT = d.biteEvery;
         if (bite(world, cr, i, d.bite * nm.dps * (cr.scale || 1))) { cr.victim = -1; cr.state = 'feed'; cr.st = 3.5; cr.hp = Math.min(cr.maxHp, cr.hp + 12); cr.food = Math.min(1, cr.food + (AL.Eco ? AL.Eco.TUNE.FEED.ant : 0)); }
       }
-      if (cr.attackers >= 4 && cr.hp < cr.maxHp * 0.45) cr.state = 'flee';
+      if (spiderHurt(cr)) cr.state = 'flee';
       break;
     }
     case 'feed':
       cr.st -= dt; fightBack(world, cr, dt, nm.dps);
       if (cr.st <= 0) cr.state = 'return';
-      if (cr.attackers >= 4 && cr.hp < cr.maxHp * 0.45) cr.state = 'flee';
+      // ants gathering round her meal: she leaves it rather than be mobbed
+      else if (cr.attackers === 0 && ((world.tick + cr.slot) % 10) === 0 && W().antsIn(world, cr.x, cr.y, cr.r + 30, BUF) >= 4) cr.state = 'return';
+      if (spiderHurt(cr)) cr.state = 'flee';
       break;
     case 'flee': case 'return': {
       const fast = cr.state === 'flee' ? 1.3 : 0.8;
       fightBack(world, cr, dt, nm.dps);
-      if (steer(world, cr, cr.home.x, cr.home.y, d.speed * fast * nm.speed * slow, dt) < 4) {
+      if (goHome(world, cr, d.speed * fast * nm.speed * slow, dt) < 4) {
         cr.state = cr.wintering || e.winter ? 'hide' : 'lurk';
         if (cr.state === 'hide') cr.hidden = true;
       }
@@ -282,6 +350,19 @@ function spider(world, cr, dt) {
   }
 }
 
+// a night walk for a spider: a point round her lair, out in the open
+function prowlFrom(world, cr) {
+  const S = world.surface;
+  for (let k = 0; k < 6; k++) {
+    const a = world.R() * TAU, r = SPIDER.PROWL[0] + world.R() * (SPIDER.PROWL[1] - SPIDER.PROWL[0]);
+    const x = AL.clamp(cr.home.x + AL.cos(a) * r, 20, S.W - 20), y = AL.clamp(cr.home.y + AL.sin(a) * r, 20, S.H - 20);
+    if (AL.Surface.isBlocked(S, x, y)) continue;
+    cr.tx = x; cr.ty = y; cr.state = 'prowl'; return true;
+  }
+  return false;
+}
+// Ground beetle (Carabidae): a night forager. By day it keeps close to its shelter under a log or a stone, with
+// long still spells; after dark it runs far and fast over the yard. Mobbed, it plods back toward its shelter.
 function beetle(world, cr, dt) {
   const d = cr.def, e = world.env, nm = AL.World.nightMod('beetle', e.night, cr.nm);
   if (e.winter && cr.state !== 'hide' && cr.state !== 'burrow') cr.state = 'burrow';
@@ -291,17 +372,19 @@ function beetle(world, cr, dt) {
       if (cr.attackers > 0) { cr.state = 'defend'; cr.st = 0; break; }
       if (cr.st > 0) { cr.st -= dt; if (cr.st <= 0 && AL.Eco) AL.Eco.beetleLook(world, cr); break; }   // a hungry beetle looks for something dead, or slow
       if (cr.eat && AL.Eco && AL.Eco.beetleEat(world, cr, dt)) break;
-      if (steer(world, cr, cr.tx, cr.ty, d.speed * nm.speed, dt) < 6) {
-        const a = world.R() * TAU, r = 60 + world.R() * 180;
+      const dark = e.night > 0.45;
+      if (steer(world, cr, cr.tx, cr.ty, d.speed * nm.speed * (dark ? 1.15 : 0.85), dt) < 6 || (cr.wt = (cr.wt || 0) + dt) > 40) {
+        // (and a walk that's taking far too long, round something in the way: pick another)
+        const a = world.R() * TAU, r = dark ? 90 + world.R() * 230 : 40 + world.R() * 110;
         cr.tx = AL.clamp(cr.home.x + AL.cos(a) * r, 20, world.surface.W - 20); cr.ty = AL.clamp(cr.home.y + AL.sin(a) * r, 20, world.surface.H - 20);
-        cr.st = 1 + world.R() * 3;
+        cr.st = dark ? 0.6 + world.R() * 1.6 : 1.5 + world.R() * 4; cr.wt = 0;
       }
       break;
     }
     case 'defend':
       fightBack(world, cr, dt, nm.dps);
       // a big swarm makes it try to plod away, slower the more ants hang on
-      if (cr.attackers >= 6) steer(world, cr, cr.home.x, cr.home.y, d.speed * 0.4 * slowOf(cr) + 2, dt);
+      if (cr.attackers >= 6) goHome(world, cr, d.speed * 0.4 * slowOf(cr) + 2, dt);
       if (cr.attackers === 0) { cr.st += dt; if (cr.st > 2) { cr.state = 'wander'; cr.st = 0; } } else cr.st = 0;
       break;
     case 'stalk': case 'bite': case 'feed':   // a hungry beetle after an ant (eco-hunters.js)
@@ -312,7 +395,7 @@ function beetle(world, cr, dt) {
       if (AL.Eco) AL.Eco.huntTick(world, cr, dt, d.speed * 1.2 * nm.speed); else cr.state = 'wander';
       break;
     case 'burrow':
-      if (steer(world, cr, cr.home.x, cr.home.y, d.speed, dt) < 6) { cr.state = 'hide'; cr.hidden = true; }
+      if (goHome(world, cr, d.speed, dt) < 6) { cr.state = 'hide'; cr.hidden = true; }
       break;
     case 'hide':
       cr.hidden = true;
@@ -334,7 +417,13 @@ function ladybug(world, cr, dt) {
       cr.st -= dt; cr.biteT2 = (cr.biteT2 || 3) - dt;
       if (cr.biteT2 <= 0 && cr.attackers === 0) { cr.biteT2 = 3; if (p && p.aphids >= 1) { p.aphids = Math.max(0, p.aphids - 1); cr.food = Math.min(1, cr.food + (AL.Eco ? AL.Eco.TUNE.FEED.aphid : 0)); cr.st = Math.max(cr.st, 6); } cr.a += (world.R() - 0.5) * 1.2; }
       fightBack(world, cr, dt);
-      if (cr.attackers >= 3 || cr.hp < cr.maxHp * 0.5 || cr.st <= 0 || !p || p.aphids < 2 || e.winter) {   // (st is kept up while she finds aphids)
+      // Ladybug (Coccinellidae): grabbed, she clamps down flat on the leaf, legs tucked under her hard shell (and
+      // bitter reflex blood), and only flies once the ants loosen their hold or she's had enough
+      if (cr.attackers > 0 && !(cr.clampT > 0) && !cr.clamped) { cr.clampT = 3.5; cr.clamped = true; cr.armor = Math.max(d.armor, 0.75); }
+      if (cr.clampT > 0) { cr.clampT -= dt; if (cr.clampT > 0 && cr.attackers > 0 && cr.hp >= cr.maxHp * 0.35) break; cr.clampT = 0; }
+      if (cr.clamped && cr.attackers === 0) { cr.clamped = false; cr.armor = d.armor; }
+      if (cr.attackers >= 3 || cr.hp < cr.maxHp * 0.5 || cr.st <= 0 || !p || p.aphids < 2 || e.winter || cr.clamped) {   // (st is kept up while she finds aphids)
+        cr.armor = d.armor; cr.clamped = false;
         cr.state = 'flyoff'; cr.flying = true; cr.prey = false;
         if (p) { p.ladybug = false; if (p.ladybugCr === cr) p.ladybugCr = null; }
         const a = AL.atan2(cr.y - S.H / 2, cr.x - S.W / 2) + (world.R() - 0.5);
@@ -588,7 +677,7 @@ function spawner(world) {
 
 // ---- system --------------------------------------------------------------------------------------
 const BEHAVE = { spider, beetle, ladybug, caterpillar, cocoon, butterfly, termites, herd, bird };
-AL.WorldCreatures = { bindDeath, TYPES, BEHAVE, GRAPPLE, ESCORT, escortHandler, spawn, remove, onDeath, grab, release, grappleHandler, engage, trySendBird, exposedClusterOf, steer, biteBack, fightBack, slowOf, plantsFor, bite, antValid, edgePoint, SPIDER_GRACE };
+AL.WorldCreatures = { bindDeath, TYPES, BEHAVE, GRAPPLE, ESCORT, escortHandler, spawn, remove, onDeath, grab, release, grappleHandler, engage, trySendBird, exposedClusterOf, steer, goHome, loneAnt, biteBack, fightBack, slowOf, plantsFor, bite, antValid, edgePoint, SPIDER_GRACE, SPIDER };
 
 AL.registerSystem({
   id: 'world-creatures', order: 12,

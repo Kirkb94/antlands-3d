@@ -121,6 +121,7 @@ function antAttack(world, cr, dt, spd, lunge, mul, done) {
 // a hungry ground beetle with nothing dead to eat: a lone ant close by (eco.js beetleLook)
 function beetleAnts(world, cr) {
   if (!huntsAnts(world, cr) || cr.attackers) return false;
+  if (world.env.night < 0.45 && drive(cr) < 0.6) return false;   // by day only a really hungry one (they hunt after dark)
   const dv = drive(cr), i = nearestAnt(world, cr.x, cr.y, 50 + 110 * dv, 1 + Math.round(dv * 3), false);
   if (i < 0) return false;
   target(cr, i, world);
@@ -130,6 +131,22 @@ function beetleAnts(world, cr) {
 function wanderPoint(world, cr, rad) {
   const S = world.surface, a = world.R() * TAU, r = rad * (0.3 + world.R() * 0.7);
   cr.tx = AL.clamp(cr.home.x + AL.cos(a) * r, 20, S.W - 20); cr.ty = AL.clamp(cr.home.y + AL.sin(a) * r, 20, S.H - 20);
+}
+// Centipedes (Chilopoda) keep to cover even when out hunting: they run along the edges of things (logs, stones, the
+// leaf litter) rather than across open lawn. Of a few points in reach of home, the one with most cover.
+function coverPoint(world, cr, rad) {
+  const S = world.surface, T = AL.Terrain;
+  let best = null, bv = -1;
+  for (let k = 0; k < 6; k++) {
+    wanderPoint(world, cr, rad);
+    const x = cr.tx, y = cr.ty;
+    if (AL.Surface.isBlocked(S, x, y)) continue;
+    let v = world.R() * 0.5;
+    if (T && S.terrain) { const t = T.at(S, x, y); if (t === T.T.LITTER) v += 2; else if (t === T.T.MUD) v += 0.8; }
+    for (let j = 0; j < 4; j++) { const a = j * Math.PI / 2; if (AL.Surface.isBlocked(S, x + AL.cos(a) * 26, y + AL.sin(a) * 26)) { v += 1.2; break; } }   // by a log or a stone
+    if (v > bv) { bv = v; best = { x, y }; }
+  }
+  if (best) { cr.tx = best.x; cr.ty = best.y; } else wanderPoint(world, cr, rad);
 }
 function goHide(cr) { cr.hidden = true; cr.prey = false; cr.hostile = false; }
 function unhide(cr) { cr.hidden = false; cr.prey = true; cr.hostile = true; }
@@ -152,12 +169,12 @@ function centipede(world, cr, dt) {
     case 'idle': case 'hide':
       goHide(cr); cr.state = 'hide';
       if (cr.hp < cr.maxHp && cr.food > 0.2) cr.hp = Math.min(cr.maxHp, cr.hp + 1 * dt);   // (resting heals, unless it's starving)
-      if (!e.winter && (dark || starving)) { unhide(cr); cr.state = 'roam'; wanderPoint(world, cr, 320); }
+      if (!e.winter && (dark || starving)) { unhide(cr); cr.state = 'roam'; coverPoint(world, cr, 320); }
       break;
     case 'roam': {
       if (cr.attackers > 0) { WC().fightBack(world, cr, dt, nm.dps); if (fleeing(cr)) cr.state = 'flee'; break; }
       if (!dark && !starving) { cr.state = 'return'; break; }
-      if (WC().steer(world, cr, cr.tx, cr.ty, d.speed * 0.6 * nm.speed * slow, dt) < 8) wanderPoint(world, cr, 320);
+      if (WC().steer(world, cr, cr.tx, cr.ty, d.speed * 0.6 * nm.speed * slow, dt) < 8 || (cr.wt = (cr.wt || 0) + dt) > 30) { coverPoint(world, cr, 320); cr.wt = 0; }
       if (((world.tick + cr.slot) % 6) === 0 && huntsAnts(world, cr)) {
         const dv = drive(cr), i = nearestAnt(world, cr.x, cr.y, d.sense * nm.vis * (0.6 + dv) * (cr.scale || 1), 2 + Math.round(dv * 4), false);
         if (i >= 0) { target(cr, i, world); AL.emit(world, 'hunterStalk', { kind: 'centipede', col: world.ants.col[i], x: cr.x, y: cr.y }); }
@@ -169,7 +186,7 @@ function centipede(world, cr, dt) {
       break;
     case 'flee': case 'return':
       WC().fightBack(world, cr, dt, nm.dps);
-      if (WC().steer(world, cr, cr.home.x, cr.home.y, d.speed * (cr.state === 'flee' ? 1.6 : 0.9) * nm.speed * Math.max(0.5, slow), dt) < 6) { cr.state = 'hide'; goHide(cr); }
+      if (WC().goHome(world, cr, d.speed * (cr.state === 'flee' ? 1.6 : 0.9) * nm.speed * Math.max(0.5, slow), dt) < 6) { cr.state = 'hide'; goHide(cr); }
       break;
   }
 }
@@ -272,12 +289,14 @@ function assassin(world, cr, dt) {
 }
 
 // ---- praying mantis: on a plant ----
-// mobbed: she opens her wings and flies to another plant (the ants holding on drop off)
+// mobbed: she opens her wings and flies to another plant (the ants holding on drop off). A mantis is a poor flier:
+// a short, low hop to the nearest other plant, never across the yard.
 function flyOff(world, cr) {
-  const ps = WC().plantsFor(world).filter(p => p !== cr.plant && AL.sq(p.x - cr.x) + AL.sq(p.y - cr.y) < 900 * 900 && AL.sq(p.x - cr.x) + AL.sq(p.y - cr.y) > 150 * 150);
+  const ps = WC().plantsFor(world).filter(p => p !== cr.plant && AL.sq(p.x - cr.x) + AL.sq(p.y - cr.y) < 420 * 420 && AL.sq(p.x - cr.x) + AL.sq(p.y - cr.y) > 120 * 120);
+  ps.sort((a, b) => (AL.sq(a.x - cr.x) + AL.sq(a.y - cr.y)) - (AL.sq(b.x - cr.x) + AL.sq(b.y - cr.y))); ps.length = Math.min(ps.length, 2);
   const p = ps.length ? ps[(world.R() * ps.length) | 0] : null;
   cr.plant = p; cr.victim = -1;
-  if (p) { cr.tx = p.x + 12; cr.ty = p.y; } else { const a = world.R() * TAU; cr.tx = AL.clamp(cr.x + AL.cos(a) * 300, 30, world.surface.W - 30); cr.ty = AL.clamp(cr.y + AL.sin(a) * 300, 30, world.surface.H - 30); }
+  if (p) { cr.tx = p.x + 12; cr.ty = p.y; } else { const a = world.R() * TAU; cr.tx = AL.clamp(cr.x + AL.cos(a) * 160, 30, world.surface.W - 30); cr.ty = AL.clamp(cr.y + AL.sin(a) * 160, 30, world.surface.H - 30); }
   cr.state = 'fly'; cr.flying = true; cr.alt = 0.6; cr.prey = false; cr.hostile = false;
 }
 // ---- praying mantis: on a plant ----------------------------------------------------------------------------------

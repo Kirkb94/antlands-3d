@@ -255,7 +255,7 @@ function second(world) {
     cr.food = Math.max(0, cr.food - burn * (cr.hidden || e.winter ? 0.25 : 1));
     // spiders and beetles also catch the small things in the leaf litter (springtails, mites, grubs): less where an
     // army ant swarm has just stripped the ground (swarm.js world.litter)
-    if ((cr.type === 'spider' && cr.state === 'lurk') || (cr.type === 'beetle' && cr.state === 'wander')) cr.food = Math.min(1, cr.food + ECO.FEED.litter * (cr.type === 'beetle' ? 2.5 : 1) * (AL.Swarm ? AL.Swarm.preyAt(world, cr.x, cr.y) : 1) * (cr.scale || 1));   // (beetles cover more ground)
+    if ((cr.type === 'spider' && (cr.state === 'lurk' || cr.state === 'prowl')) || (cr.type === 'beetle' && cr.state === 'wander')) cr.food = Math.min(1, cr.food + ECO.FEED.litter * (cr.type === 'beetle' ? 2.5 : 1) * (AL.Swarm ? AL.Swarm.preyAt(world, cr.x, cr.y) : 1) * (cr.scale || 1));   // (beetles cover more ground)
     if (cr.food <= 0) {
       cr.hp -= cr.maxHp * ECO.STARVE;
       if (cr.hp <= 0) { eco.starved++; eco.log.push([world.t | 0, 'starved', cr.type]); if (eco.log.length > 40) eco.log.shift(); AL.emit(world, 'creatureStarved', { kind: cr.type, x: cr.x, y: cr.y }); cr.alive = false; cr.onDeath(world, -1); continue; }
