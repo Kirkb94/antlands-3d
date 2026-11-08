@@ -8,6 +8,89 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div id="boot" aria-label="Loading Antlands">
+  <style>
+    #boot{position:fixed;inset:0;z-index:9999;overflow:hidden;cursor:pointer;color:#ffd27a;background:radial-gradient(ellipse at 50% 62%,#4a2c14 0%,#1c1006 62%,#0d0703 100%);font-family:system-ui,-apple-system,"Segoe UI",sans-serif;transition:opacity .75s cubic-bezier(.4,0,1,1),transform .75s cubic-bezier(.4,0,1,1)}
+    #boot.out{opacity:0;transform:scale(1.035);pointer-events:none}
+    #bootCv{position:absolute;inset:0;width:100%;height:100%;display:block;opacity:0;transition:opacity 1.4s cubic-bezier(.16,1,.3,1)}
+    #boot.live #bootCv{opacity:1}
+    #boot .vig{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 55%,rgba(0,0,0,0) 48%,rgba(12,6,2,.78) 100%),linear-gradient(180deg,rgba(14,8,3,.62) 0%,rgba(14,8,3,0) 30%,rgba(14,8,3,0) 62%,rgba(14,8,3,.85) 100%)}
+    #boot .bt{position:absolute;left:0;right:0;top:0;padding:clamp(8px,2vh,22px) 16px 0;text-align:center;pointer-events:none}
+    #boot h1{margin:0;font:900 clamp(56px,11vw,160px)/.95 Georgia,"Times New Roman",serif;letter-spacing:.04em;color:#ffd27a;-webkit-text-stroke:1.5px rgba(70,30,6,.55);text-shadow:0 0 40px rgba(255,160,50,.55),0 5px 0 rgba(60,24,4,.7),0 10px 26px rgba(0,0,0,.55);animation:bootIn 1s cubic-bezier(.16,1,.3,1) both}
+    #boot .by{margin:clamp(4px,1vh,10px) 0 0;font-size:clamp(11px,1.3vw,15px);letter-spacing:.32em;font-weight:700;text-transform:uppercase;color:#ffc488;text-shadow:0 2px 6px rgba(0,0,0,.7);animation:bootIn 1s .18s cubic-bezier(.16,1,.3,1) both}
+    #boot .bb{position:absolute;left:0;right:0;margin:0 auto;bottom:clamp(64px,11vh,110px);width:min(440px,74vw);text-align:center;animation:bootIn .9s .35s cubic-bezier(.16,1,.3,1) both}
+    #boot .lab{display:flex;justify-content:space-between;font-size:11px;letter-spacing:.26em;font-weight:700;color:#e8c08a;text-shadow:0 1px 4px #000;margin-bottom:7px}
+    #boot .bar{height:4px;border-radius:4px;background:rgba(255,210,150,.16);overflow:hidden;box-shadow:0 1px 6px rgba(0,0,0,.5)}
+    #boot .bar i{display:block;height:100%;width:0;border-radius:4px;background:linear-gradient(90deg,#b8672a,#ffd27a);box-shadow:0 0 12px rgba(255,190,90,.75)}
+    #boot .tip{min-height:2.6em;margin:12px 0 0;font-size:clamp(12px,1.25vw,14px);line-height:1.35;color:#f3e2c4;text-shadow:0 1px 5px #000;transition:opacity .35s ease}
+    #boot .tip.fade{opacity:0}
+    #boot .skip{margin-top:6px;font-size:11px;letter-spacing:.14em;color:rgba(255,220,170,.6);opacity:0;animation:bootFade .6s 1.2s ease both}
+    #boot .legal{position:absolute;left:0;right:0;bottom:0;padding:0 18px clamp(10px,2vh,18px);text-align:center;font-size:clamp(9px,.85vw,11px);line-height:1.45;color:rgba(240,220,190,.62);text-shadow:0 1px 3px #000;pointer-events:none;animation:bootFade .8s .5s ease both}
+    #boot .legal b{color:rgba(255,215,160,.8);font-weight:700}
+    #boot .rp{position:absolute;right:10px;bottom:6px;font-size:8px;letter-spacing:.08em;color:rgba(255,230,190,.07);user-select:none;transition:color .3s}
+    #boot .rp:hover{color:rgba(255,230,190,.55)}
+    @keyframes bootIn{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+    @keyframes bootFade{from{opacity:0}to{opacity:1}}
+    @media (prefers-reduced-motion:reduce){#boot,#boot *{animation:none!important;transition:opacity .2s linear!important}#boot .skip{opacity:1}}
+  </style>
+  <canvas id="bootCv"></canvas>
+  <div class="vig"></div>
+  <div class="bt"><h1>Antlands</h1><p class="by">A game by Kirk Benjamin</p></div>
+  <div class="bb">
+    <div class="lab"><span>LOADING THE YARD</span><span class="pct">0%</span></div>
+    <div class="bar"><i></i></div>
+    <p class="tip"></p>
+    <div class="skip">Click or press any key to skip</div>
+  </div>
+  <div class="legal">
+    <b>Photosensitive seizure warning:</b> a very small number of people may have seizures when exposed to certain flashing lights or patterns, including in video games. If you or anyone in your family has epilepsy or has had seizures, consult a doctor before playing. Stop playing at once and see a doctor if you feel dizzy, have altered vision, eye or muscle twitches, disorientation, or any involuntary movement.<br>
+    &copy; 2026 Kirk Benjamin. All rights reserved. Antlands is a work of fiction; any resemblance to real games, products or people is coincidental. Music you play through the in-game SoundCloud player belongs to its owners.
+  </div>
+  <span class="rp">RapPatty is here</span>
+</div>
+<script>
+(function () {
+  var el = document.getElementById('boot');
+  if (/[?&]noboot\b/.test(location.search)) { el.remove(); window.BOOT = { done: true, gone: true }; return; }
+  var B = window.BOOT = { t0: performance.now(), MIN: 4000, loaded: false, skip: false, done: false, gone: false, p: 0 };
+  var bar = el.querySelector('.bar i'), pct = el.querySelector('.pct'), tip = el.querySelector('.tip'), hint = el.querySelector('.skip');
+  var tips = [
+    'Foragers lay a scent trail home. Paint a Food trail [F] to send them where you want.',
+    'Larvae grow on protein; sugar keeps the grown ants going.',
+    'Wolf spiders pick off ants walking alone. There is safety in numbers.',
+    'Ground beetles hunt after dark. Daylight is the safer time to forage far.',
+    'Water in the way? Drag the Bridge tool across it and your ants become the bridge.',
+    'Sound the Mower alarm [U] before the mower reaches your ants.',
+    'Soldiers answer alarm scent. A fight anywhere calls them in.',
+    'A robin’s shadow circles before it dives. Ants under cover are safe.'
+  ];
+  var ti = Math.floor(Math.random() * tips.length); tip.textContent = tips[ti];
+  var tipT = setInterval(function () { if (B.done) return clearInterval(tipT); tip.classList.add('fade'); setTimeout(function () { ti = (ti + 1) % tips.length; tip.textContent = tips[ti]; tip.classList.remove('fade'); }, 360); }, 3200);
+  function real() {
+    var n = document.scripts.length || 1, r = 0;
+    try { var es = performance.getEntriesByType('resource'); for (var k = 0; k < es.length; k++) if (/\.js(\?|$)/.test(es[k].name)) r++; } catch (e) {}
+    return Math.min(1, r / n);
+  }
+  function frame(now) {
+    if (B.done) return;
+    var byTime = (now - B.t0) / B.MIN, target = B.loaded ? 1 : Math.min(0.95, real());
+    var show = Math.min(target, B.skip ? 1 : byTime);
+    B.p += (show - B.p) * 0.12;
+    bar.style.width = (B.p * 100).toFixed(1) + '%'; pct.textContent = Math.round(B.p * 100) + '%';
+    if (B.loaded && (B.p > 0.995 || (B.skip && B.p > 0.9))) finish(); else requestAnimationFrame(frame);
+  }
+  function finish() {
+    B.done = true; bar.style.width = '100%'; pct.textContent = '100%';
+    el.classList.add('out'); removeEventListener('keydown', skip);
+    setTimeout(function () { B.gone = true; if (B.stop3d) B.stop3d(); el.remove(); }, 800);
+  }
+  function skip() { if (B.done) return; B.skip = true; if (!B.loaded) hint.textContent = 'Starting…'; }
+  el.addEventListener('pointerdown', skip); addEventListener('keydown', skip);
+  addEventListener('load', function () { B.loaded = true; });
+  B.tick = frame;   // (for driving it by hand in a test)
+  requestAnimationFrame(frame);
+})();
+</script>
 <canvas id="cv"></canvas>
 
 <div id="hud" hidden>
@@ -136,6 +219,7 @@
 <script src="phone-ui.js"></script>
 <script src="main.js"></script>
 <script type="module" src="render3d.js"></script>
+<script type="module" src="boot3d.js"></script>
   <script type="module" src="render3d-yard.js"></script>
 <script type="module" src="icons3d.js"></script>
 <script type="module" src="hats3d.js"></script>
